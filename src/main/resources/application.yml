@@ -1,0 +1,85 @@
+spring:
+  application:
+    name: inventory-service
+    
+  datasource:
+    url: jdbc:h2:mem:inventory
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: 
+    
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+      
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        use_sql_comments: true
+        
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    default-property-inclusion: non_null
+    
+server:
+  port: 8081
+  error:
+    include-message: always
+    include-binding-errors: always
+    include-stacktrace: on_param
+    include-exception: false
+    
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+        
+logging:
+  level:
+    root: INFO
+    com.inventory: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+    
+aws:
+  region: us-east-1
+  endpoint: ${AWS_ENDPOINT:http://localhost:4566}
+  sns:
+    topic-arn: ${SNS_TOPIC_ARN:arn:aws:sns:us-east-1:000000000000:inventory-events}
+  sqs:
+    queue-url: ${SQS_QUEUE_URL:http://localhost:4566/000000000000/inventory-events}
+    
+resilience4j:
+  circuitbreaker:
+    instances:
+      eventPublisher:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        
+  retry:
+    instances:
+      database:
+        max-attempts: 3
+        wait-duration: 100ms
+        
+  ratelimiter:
+    instances:
+      api:
+        limit-for-period: 100
+        limit-refresh-period: 1s
+

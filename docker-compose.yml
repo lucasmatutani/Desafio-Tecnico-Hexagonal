@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  app:
+    image: maven:3.9-eclipse-temurin-21
+    container_name: java-spring-dev
+    
+    # Monta o código e cache do Maven
+    volumes:
+      - .:/app
+      - maven-cache:/root/.m2
+    
+    working_dir: /app
+    
+    # Portas da aplicação e debug
+    ports:
+      - "8080:8080"
+      - "5005:5005"
+    
+    # Habilita debug remoto
+    environment:
+      - MAVEN_OPTS=-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
+    
+    # Mantém container ativo para o Dev Container
+    command: sleep infinity
+    
+    networks:
+      - app-network
+
+# Cache do Maven para não baixar dependências toda vez
+volumes:
+  maven-cache:
+    driver: local
+
+networks:
+  app-network:
+    driver: bridge

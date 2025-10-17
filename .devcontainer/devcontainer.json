@@ -1,0 +1,42 @@
+{
+  "name": "Java Spring Boot Dev Environment",
+  
+  // Usa o docker-compose.yml existente
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/app",
+  
+  // Extensões que serão instaladas automaticamente no container
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        // Essenciais para Java
+        "vscjava.vscode-java-pack",
+        "vmware.vscode-boot-dev-pack"
+      ],
+      
+      // Configurações do Java 21
+      "settings": {
+        "java.configuration.runtimes": [
+          {
+            "name": "JavaSE-21",
+            "path": "/opt/java/openjdk"
+          }
+        ],
+        "java.compile.nullAnalysis.mode": "automatic",
+        "java.home": "/opt/java/openjdk",
+        "spring-boot.ls.java.home": "/opt/java/openjdk",
+        "java.debug.settings.hotCodeReplace": "auto"
+      }
+    }
+  },
+  
+  // Portas que serão expostas automaticamente
+  "forwardPorts": [8080, 5005],
+  
+  // Comandos executados após criar o container
+  "postCreateCommand": "mvn clean install -DskipTests",
+  
+  // Mantém o container rodando
+  "overrideCommand": true
+}
