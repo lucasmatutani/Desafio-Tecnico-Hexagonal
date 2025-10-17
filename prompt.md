@@ -3115,3 +3115,650 @@ CARACTERÍSTICAS:
 ✅ Mensagens de erro customizadas
 ✅ Factory methods (ErrorResponse.of)
 ✅ Nested records (FieldErrorDetail)
+
+========================================================================================
+
+PROMPT 17: REST Mappers (DTO ↔ Command)
+
+Crie os REST Mappers no pacote adapters/input/rest/mapper/.
+
+ARQUIVOS A CRIAR:
+
+1. InventoryRestMapper.java
+
+package com.inventory.adapters.input.rest.mapper;
+
+import com.inventory.adapters.input.rest.dto.*;
+import com.inventory.application.port.input.*;
+import com.inventory.domain.model.Sku;
+import com.inventory.domain.model.StoreId;
+import org.springframework.stereotype.Component;
+
+import java.time.LocalDateTime;
+
+@Component
+public class InventoryRestMapper {
+    
+    public ReserveStockCommand toCommand(ReserveStockRequest request) {
+        return new ReserveStockCommand(
+            StoreId.of(request.storeId()),
+            Sku.of(request.sku()),
+            request.quantity(),
+            request.customerId()
+        );
+    }
+    
+    public CommitStockCommand toCommand(CommitStockRequest request) {
+        return new CommitStockCommand(
+            request.reservationId(),
+            request.orderId()
+        );
+    }
+    
+    public ReleaseStockCommand toCommand(ReleaseStockRequest request) {
+        return new ReleaseStockCommand(
+            request.reservationId(),
+            request.reason()
+        );
+    }
+    
+    public ReservationResponse toReservationResponse(
+            String reservationId,
+            ReserveStockCommand command,
+            LocalDateTime expiresAt) {
+        return new ReservationResponse(
+            reservationId,
+            command.storeId().value(),
+            command.sku().value(),
+            command.quantity(),
+            "RESERVED",
+            expiresAt,
+            "Stock reserved successfully. Complete your purchase before expiration."
+        );
+    }
+    
+    public ReservationResponse toCommitResponse(String orderId) {
+        return new ReservationResponse(
+            null,
+            null,
+            null,
+            0,
+            "COMMITTED",
+            null,
+            "Stock committed successfully. OrderId: " + orderId
+        );
+    }
+    
+    public InventoryResponse toInventoryResponse(InventoryView view) {
+        return new InventoryResponse(
+            view.storeId(),
+            view.sku(),
+            view.productName(),
+            view.availableStock(),
+            view.reservedStock(),
+            view.soldStock(),
+            view.availableStock() + view.reservedStock()
+        );
+    }
+}
+
+CARACTERÍSTICAS:
+✅ Converte DTOs → Commands
+✅ Converte Domain → Response DTOs
+✅ @Component para Spring injetar
+✅ Métodos específicos para cada caso
+```
+
+========================================================================================
+
+## **📋 PROMPT 18: REST Controllers**
+```
+Crie os REST Controllers no pacote adapters/input/rest/controller/.
+
+ARQUIVOS A CRIAR:
+
+1. InventoryCommandController.java
+
+package com.inventory.adapters.input.rest.controller;
+
+import com.inventory.adapters.input.rest.dto.*;
+import com.inventory.adapters.input.rest.mapper.InventoryRestMapper;
+import com.inventory.application.port.input.*;
+import com.inventory.domain.model.ReservationId;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDateTime;
+
+@RestController
+@RequestMapping("/api/v1/inventory")
+@RequiredArgsConstructor
+@Slf4j
+@Tag(name = "Inventory Commands", description = "Write operations for inventory management")
+public class InventoryCommandController {
+    
+    private final ReserveStockUseCase reserveStockUseCase;
+    private final CommitStockUseCase commitStockUseCase;
+    private final ReleaseStockUseCase releaseStockUseCase;
+    private final InventoryRestMapper mapper;
+    
+    @PostMapping("/reserve")
+    @Operation(summary = "Reserve stock", description = "Reserve stock for a customer with TTL")
+    public ResponseEntity<?> reserveStock(@Valid @RequestBody ReserveStockRequest request) {
+        
+        log.info("📥 Reserve stock request - store: {}, sku: {}, qty: {}", 
+            request.storeId(), request.sku(), request.quantity());
+        
+        var command = mapper.toCommand(request);
+        var result = reserveStockUseCase.reserve(command);
+        
+        if (result.isSuccess()) {
+            ReservationId reservationId = result.getValue();
+            LocalDateTime expiresAt = LocalDateTime.now().plusMinutes(15);
+            
+            var response = mapper.toReservationResponse(
+                reservationId.value(),
+                command,
+                expiresAt
+            );
+            
+            log.info("✅ Stock reserved - reservationId: {}", reservationId);
+            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        } else {
+            log.warn("❌ Reservation failed: {}", result.getError().message());
+            return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ErrorResponse.of(
+                    HttpStatus.BAD_REQUEST.value(),
+                    result.getError().code(),
+                    result.getError().message(),
+                    "/api/v1/inventory/reserve",
+                    result.getError().details()
+                ));
+        }
+    }
+    
+    @PostMapping("/commit")
+    @Operation(summary = "Commit reservation", description = "Confirm sale and commit reserved stock")
+    public ResponseEntity<?> commitStock(@Valid @RequestBody CommitStockRequest request) {
+        
+        log.info("📥 Commit stock request - reservationId: {}", request.reservationId());
+        
+        var command = mapper.toCommand(request);
+        var result = commitStockUseCase.commit(command);
+        
+        if (result.isSuccess()) {
+            String orderId = result.getValue();
+            var response = mapper.toCommitResponse(orderId);
+            
+            log.info("✅ Stock committed - orderId: {}", orderId);
+            return ResponseEntity.ok(response);
+        } else {
+            log.warn("❌ Commit failed: {}", result.getError().message());
+            return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ErrorResponse.of(
+                    HttpStatus.BAD_REQUEST.value(),
+                    result.getError().code(),
+                    result.getError().message(),
+                    "/api/v1/inventory/commit",
+                    result.getError().details()
+                ));
+        }
+    }
+    
+    @PostMapping("/release")
+    @Operation(summary = "Release reservation", description = "Cancel reservation and return stock")
+    public ResponseEntity<?> releaseStock(@Valid @RequestBody ReleaseStockRequest request) {
+        
+        log.info("📥 Release stock request - reservationId: {}", request.reservationId());
+        
+        var command = mapper.toCommand(request);
+        var result = releaseStockUseCase.release(command);
+        
+        if (result.isSuccess()) {
+            log.info("✅ Stock released");
+            return ResponseEntity.ok(new ReservationResponse(
+                request.reservationId(),
+                null, null, 0,
+                "CANCELLED",
+                null,
+                "Reservation cancelled successfully"
+            ));
+        } else {
+            log.warn("❌ Release failed: {}", result.getError().message());
+            return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ErrorResponse.of(
+                    HttpStatus.BAD_REQUEST.value(),
+                    result.getError().code(),
+                    result.getError().message(),
+                    "/api/v1/inventory/release",
+                    result.getError().details()
+                ));
+        }
+    }
+}
+
+2. InventoryQueryController.java
+
+package com.inventory.adapters.input.rest.controller;
+
+import com.inventory.adapters.input.rest.dto.ErrorResponse;
+import com.inventory.adapters.input.rest.dto.InventoryResponse;
+import com.inventory.adapters.input.rest.mapper.InventoryRestMapper;
+import com.inventory.application.port.input.QueryStockUseCase;
+import com.inventory.domain.model.Sku;
+import com.inventory.domain.model.StoreId;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/v1/inventory")
+@RequiredArgsConstructor
+@Slf4j
+@Tag(name = "Inventory Queries", description = "Read operations for inventory management")
+public class InventoryQueryController {
+    
+    private final QueryStockUseCase queryStockUseCase;
+    private final InventoryRestMapper mapper;
+    
+    @GetMapping("/{storeId}/{sku}")
+    @Operation(summary = "Get stock information", description = "Query current stock levels")
+    public ResponseEntity<?> getStock(
+            @PathVariable String storeId,
+            @PathVariable String sku) {
+        
+        log.info("📥 Query stock - store: {}, sku: {}", storeId, sku);
+        
+        try {
+            var result = queryStockUseCase.findByStoreAndSku(
+                StoreId.of(storeId),
+                Sku.of(sku)
+            );
+            
+            if (result.isPresent()) {
+                var response = mapper.toInventoryResponse(result.get());
+                log.debug("✅ Stock found - available: {}", response.availableStock());
+                return ResponseEntity.ok(response);
+            } else {
+                log.warn("❌ Stock not found");
+                return ResponseEntity
+                    .status(HttpStatus.NOT_FOUND)
+                    .body(ErrorResponse.of(
+                        HttpStatus.NOT_FOUND.value(),
+                        "PRODUCT_NOT_FOUND",
+                        String.format("Product %s not found in store %s", sku, storeId),
+                        String.format("/api/v1/inventory/%s/%s", storeId, sku)
+                    ));
+            }
+            
+        } catch (IllegalArgumentException ex) {
+            log.error("❌ Invalid input: {}", ex.getMessage());
+            return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ErrorResponse.of(
+                    HttpStatus.BAD_REQUEST.value(),
+                    "INVALID_INPUT",
+                    ex.getMessage(),
+                    String.format("/api/v1/inventory/%s/%s", storeId, sku)
+                ));
+        }
+    }
+    
+    @GetMapping("/health")
+    @Operation(summary = "Health check", description = "Check if service is running")
+    public ResponseEntity<String> health() {
+        return ResponseEntity.ok("Inventory Service is running");
+    }
+}
+
+CARACTERÍSTICAS:
+✅ @RestController + @RequestMapping
+✅ Validação com @Valid
+✅ OpenAPI documentation (@Operation, @Tag)
+✅ Logging estruturado
+✅ Railway Oriented Programming (Result)
+✅ HTTP Status codes apropriados
+✅ Separação Command/Query (CQRS)
+```
+
+========================================================================================
+
+## **📋 PROMPT 19: Global Exception Handler**
+```
+Crie o Global Exception Handler no pacote adapters/input/rest/exception/.
+
+ARQUIVO A CRIAR:
+
+GlobalExceptionHandler.java
+
+package com.inventory.adapters.input.rest.exception;
+
+import com.inventory.adapters.input.rest.dto.ErrorResponse;
+import com.inventory.adapters.input.rest.dto.ErrorResponse.FieldErrorDetail;
+import com.inventory.domain.exception.DomainException;
+import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+
+@RestControllerAdvice
+@Slf4j
+public class GlobalExceptionHandler {
+    
+    @ExceptionHandler(DomainException.class)
+    public ResponseEntity<ErrorResponse> handleDomainException(
+            DomainException ex, 
+            HttpServletRequest request) {
+        
+        log.error("Domain exception: {} - {}", ex.getCode(), ex.getMessage(), ex);
+        
+        ErrorResponse response = new ErrorResponse(
+            LocalDateTime.now(),
+            HttpStatus.BAD_REQUEST.value(),
+            ex.getCode(),
+            ex.getMessage(),
+            request.getRequestURI(),
+            ex.getDetails(),
+            List.of()
+        );
+        
+        return ResponseEntity
+            .status(HttpStatus.BAD_REQUEST)
+            .body(response);
+    }
+    
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ErrorResponse> handleValidationException(
+            MethodArgumentNotValidException ex,
+            HttpServletRequest request) {
+        
+        log.error("Validation failed: {}", ex.getMessage());
+        
+        List<FieldErrorDetail> fieldErrors = ex.getBindingResult()
+            .getAllErrors()
+            .stream()
+            .map(error -> {
+                String fieldName = ((FieldError) error).getField();
+                String message = error.getDefaultMessage();
+                Object rejectedValue = ((FieldError) error).getRejectedValue();
+                return new FieldErrorDetail(fieldName, message, rejectedValue);
+            })
+            .toList();
+        
+        ErrorResponse response = new ErrorResponse(
+            LocalDateTime.now(),
+            HttpStatus.BAD_REQUEST.value(),
+            "VALIDATION_ERROR",
+            "Request validation failed",
+            request.getRequestURI(),
+            Map.of("errorCount", fieldErrors.size()),
+            fieldErrors
+        );
+        
+        return ResponseEntity
+            .status(HttpStatus.BAD_REQUEST)
+            .body(response);
+    }
+    
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ErrorResponse> handleIllegalArgumentException(
+            IllegalArgumentException ex,
+            HttpServletRequest request) {
+        
+        log.error("Illegal argument: {}", ex.getMessage());
+        
+        ErrorResponse response = ErrorResponse.of(
+            HttpStatus.BAD_REQUEST.value(),
+            "INVALID_ARGUMENT",
+            ex.getMessage(),
+            request.getRequestURI()
+        );
+        
+        return ResponseEntity
+            .status(HttpStatus.BAD_REQUEST)
+            .body(response);
+    }
+    
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ErrorResponse> handleGenericException(
+            Exception ex,
+            HttpServletRequest request) {
+        
+        log.error("Unexpected error", ex);
+        
+        ErrorResponse response = ErrorResponse.of(
+            HttpStatus.INTERNAL_SERVER_ERROR.value(),
+            "INTERNAL_ERROR",
+            "An unexpected error occurred. Please try again later.",
+            request.getRequestURI(),
+            Map.of("type", ex.getClass().getSimpleName())
+        );
+        
+        return ResponseEntity
+            .status(HttpStatus.INTERNAL_SERVER_ERROR)
+            .body(response);
+    }
+}
+
+CARACTERÍSTICAS:
+✅ @RestControllerAdvice para captura global
+✅ Handlers específicos por tipo de exceção
+✅ DomainException → 400 com detalhes
+✅ Validation → 400 com field errors
+✅ Generic → 500 sem expor detalhes internos
+✅ Logging de todas as exceções
+✅ ErrorResponse padronizado
+```
+
+========================================================================================
+
+## **📋 PROMPT 20: Configurações - Swagger e CORS**
+```
+Crie as configurações no pacote config/.
+
+ARQUIVOS A CRIAR:
+
+1. OpenApiConfig.java
+
+package com.inventory.config;
+
+import io.swagger.v3.oas.models.OpenAPI;
+import io.swagger.v3.oas.models.info.Contact;
+import io.swagger.v3.oas.models.info.Info;
+import io.swagger.v3.oas.models.info.License;
+import io.swagger.v3.oas.models.servers.Server;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import java.util.List;
+
+@Configuration
+public class OpenApiConfig {
+    
+    @Bean
+    public OpenAPI inventoryServiceAPI() {
+        return new OpenAPI()
+            .info(new Info()
+                .title("Inventory Management Service")
+                .description("""
+                    Event-Driven Inventory Management System with Event Sourcing and CQRS.
+                    
+                    **Architecture Patterns:**
+                    - Hexagonal Architecture (Ports & Adapters)
+                    - Domain-Driven Design (DDD)
+                    - Event Sourcing
+                    - CQRS (Command Query Responsibility Segregation)
+                    - Pessimistic Locking for consistency
+                    
+                    **Key Features:**
+                    - Reserve stock with TTL (15 minutes)
+                    - Commit reservations (finalize sale)
+                    - Release reservations (cancel)
+                    - Query stock levels
+                    - Complete audit trail via Event Store
+                    """)
+                .version("1.0.0")
+                .contact(new Contact()
+                    .name("Inventory Team")
+                    .email("inventory@example.com"))
+                .license(new License()
+                    .name("MIT")
+                    .url("https://opensource.org/licenses/MIT")))
+            .servers(List.of(
+                new Server()
+                    .url("http://localhost:8081")
+                    .description("Local development server")
+            ));
+    }
+}
+
+2. WebConfig.java
+
+package com.inventory.config;
+
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.CorsRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+@Configuration
+public class WebConfig implements WebMvcConfigurer {
+    
+    @Override
+    public void addCorsMappings(CorsRegistry registry) {
+        registry.addMapping("/api/**")
+            .allowedOrigins("http://localhost:3000", "http://localhost:4200")
+            .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+            .allowedHeaders("*")
+            .allowCredentials(true)
+            .maxAge(3600);
+    }
+}
+
+3. JacksonConfig.java
+
+package com.inventory.config;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class JacksonConfig {
+    
+    @Bean
+    public ObjectMapper objectMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.registerModule(new JavaTimeModule());
+        mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        return mapper;
+    }
+}
+
+CARACTERÍSTICAS:
+✅ Swagger UI configurado
+✅ Documentação completa da API
+✅ CORS habilitado para development
+✅ ObjectMapper configurado para LocalDateTime
+```
+
+========================================================================================
+
+## **📋 PROMPT 21: Data Initialization**
+```
+Crie o script de inicialização no pacote config/.
+
+ARQUIVO A CRIAR:
+
+DataInitializer.java
+
+package com.inventory.config;
+
+import com.inventory.adapters.output.persistence.entity.InventoryEntity;
+import com.inventory.adapters.output.persistence.repository.InventoryJpaRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.stereotype.Component;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class DataInitializer implements CommandLineRunner {
+    
+    private final InventoryJpaRepository inventoryRepository;
+    
+    @Override
+    public void run(String... args) {
+        log.info("🚀 Initializing database with sample data...");
+        
+        if (inventoryRepository.count() > 0) {
+            log.info("Database already contains data. Skipping initialization.");
+            return;
+        }
+        
+        List<InventoryEntity> initialInventory = List.of(
+            createInventory("STORE-01", "SKU123", "Notebook Dell XPS 13", 100),
+            createInventory("STORE-01", "SKU456", "iPhone 15 Pro", 50),
+            createInventory("STORE-01", "SKU789", "Samsung Galaxy S24", 75),
+            createInventory("STORE-02", "SKU123", "Notebook Dell XPS 13", 80),
+            createInventory("STORE-02", "SKU456", "iPhone 15 Pro", 40),
+            createInventory("STORE-03", "SKU789", "Samsung Galaxy S24", 60)
+        );
+        
+        inventoryRepository.saveAll(initialInventory);
+        
+        log.info("✅ Database initialized with {} products", initialInventory.size());
+        log.info("Sample SKUs: SKU123, SKU456, SKU789");
+        log.info("Sample Stores: STORE-01, STORE-02, STORE-03");
+    }
+    
+    private InventoryEntity createInventory(
+            String storeId, 
+            String sku, 
+            String productName, 
+            int stock) {
+        return InventoryEntity.builder()
+            .storeId(storeId)
+            .sku(sku)
+            .productName(productName)
+            .availableStock(stock)
+            .reservedStock(0)
+            .soldStock(0)
+            .lastUpdated(LocalDateTime.now())
+            .build();
+    }
+}
+
+CARACTERÍSTICAS:
+✅ CommandLineRunner para executar no startup
+✅ Verifica se já existe dados
+✅ Cria inventory inicial para testes
+✅ Logging informativo
+
+========================================================================================
