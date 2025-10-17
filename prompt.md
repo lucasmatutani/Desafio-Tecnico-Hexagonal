@@ -1688,3 +1688,705 @@ CARACTERÍSTICAS:
 
 ===================================================================================================================
 
+📋 PROMPT 8: Application Services - ReserveStockService
+Crie o ReserveStockService no pacote application/service/.
+
+IMPORTANTE:
+- Implementa ReserveStockUseCase
+- Orquestra domain model
+- Gerencia transações
+- Publica eventos
+- Trata exceções
+
+ARQUIVO A CRIAR:
+
+ReserveStockService.java
+
+package com.inventory.application.service;
+
+import com.inventory.application.port.input.*;
+import com.inventory.application.port.output.*;
+import com.inventory.domain.event.StockReservedEvent;
+import com.inventory.domain.exception.DomainException;
+import com.inventory.domain.exception.ProductNotFoundException;
+import com.inventory.domain.model.*;
+import com.inventory.domain.policy.ReservationPolicy;
+import com.inventory.domain.policy.ValidationResult;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.Map;
+
+@Service
+@Transactional
+@RequiredArgsConstructor
+@Slf4j
+public class ReserveStockService implements ReserveStockUseCase {
+    
+    private final InventoryRepository inventoryRepository;
+    private final ReservationRepository reservationRepository;
+    private final EventPublisher eventPublisher;
+    private final EventStore eventStore;
+    private final ReservationPolicy reservationPolicy;
+    
+    @Override
+    public Result<ReservationId, DomainError> reserve(ReserveStockCommand command) {
+        
+        log.info("Reserving stock - store: {}, sku: {}, quantity: {}, customer: {}", 
+            command.storeId(), command.sku(), command.quantity(), command.customerId());
+        
+        try {
+            // 1. Load aggregate with pessimistic lock
+            Inventory inventory = inventoryRepository
+                .findByStoreIdAndSkuWithLock(command.storeId(), command.sku())
+                .orElseThrow(() -> new ProductNotFoundException(
+                    command.sku(), 
+                    command.storeId()
+                ));
+            
+            log.debug("Inventory loaded - available: {}, reserved: {}", 
+                inventory.availableStock(), inventory.reservedStock());
+            
+            // 2. Validate business rules
+            ValidationResult validation = reservationPolicy.validate(
+                inventory, 
+                command.quantity()
+            );
+            
+            if (validation.hasErrors()) {
+                log.warn("Validation failed: {}", validation.errors());
+                return Result.failure(new DomainError(
+                    "VALIDATION_ERROR",
+                    "Reservation validation failed",
+                    Map.of("errors", validation.errors())
+                ));
+            }
+            
+            // 3. Execute domain operation
+            ReservationId reservationId = ReservationId.generate();
+            inventory.reserve(command.quantity());
+            
+            // 4. Create reservation
+            Reservation reservation = Reservation.builder()
+                .id(reservationId.value())
+                .storeId(command.storeId())
+                .sku(command.sku())
+                .quantity(command.quantity())
+                .customerId(command.customerId())
+                .status(ReservationStatus.RESERVED)
+                .createdAt(LocalDateTime.now())
+                .expiresAt(LocalDateTime.now().plus(reservationPolicy.getTtl()))
+                .build();
+            
+            // 5. Persist changes
+            inventoryRepository.save(inventory);
+            reservationRepository.save(reservation);
+            
+            // 6. Create and publish domain event
+            StockReservedEvent event = StockReservedEvent.create(
+                reservationId.value(),
+                command.storeId(),
+                command.sku(),
+                command.quantity(),
+                command.customerId()
+            );
+            
+            eventStore.store(event);
+            eventPublisher.publish(event);
+            
+            log.info("✅ Stock reserved successfully - reservationId: {}, expiresAt: {}", 
+                reservationId, reservation.getExpiresAt());
+            
+            return Result.success(reservationId);
+            
+        } catch (DomainException ex) {
+            log.error("❌ Domain error during reservation: {}", ex.getMessage(), ex);
+            return Result.failure(DomainError.from(ex));
+            
+        } catch (Exception ex) {
+            log.error("❌ Unexpected error during reservation", ex);
+            return Result.failure(new DomainError(
+                "INTERNAL_ERROR",
+                "An unexpected error occurred",
+                Map.of("error", ex.getMessage())
+            ));
+        }
+    }
+}
+
+CARACTERÍSTICAS:
+✅ @Service para Spring gerenciar
+✅ @Transactional para atomicidade
+✅ @RequiredArgsConstructor do Lombok
+✅ @Slf4j para logging estruturado
+✅ Try-catch com conversão para Result
+✅ Logging em cada etapa importante
+✅ Pessimistic locking
+✅ Event Store + Event Publisher
+
+==================================================================================================================
+
+## **📋 PROMPT 9: Application Services - CommitStockService**
+```
+Crie o CommitStockService no pacote application/service/.
+
+ARQUIVO A CRIAR:
+
+CommitStockService.java
+
+package com.inventory.application.service;
+
+import com.inventory.application.port.input.*;
+import com.inventory.application.port.output.*;
+import com.inventory.domain.event.StockCommittedEvent;
+import com.inventory.domain.exception.*;
+import com.inventory.domain.model.*;
+import com.inventory.domain.policy.ExpirationPolicy;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@Transactional
+@RequiredArgsConstructor
+@Slf4j
+public class CommitStockService implements CommitStockUseCase {
+    
+    private final InventoryRepository inventoryRepository;
+    private final ReservationRepository reservationRepository;
+    private final EventPublisher eventPublisher;
+    private final EventStore eventStore;
+    private final ExpirationPolicy expirationPolicy;
+    
+    @Override
+    public Result<String, DomainError> commit(CommitStockCommand command) {
+        
+        log.info("Committing reservation: {}", command.reservationId());
+        
+        try {
+            // 1. Load reservation
+            Reservation reservation = reservationRepository
+                .findById(command.reservationId())
+                .orElseThrow(() -> new ReservationNotFoundException(
+                    command.reservationId()
+                ));
+            
+            log.debug("Reservation found - status: {}, quantity: {}", 
+                reservation.getStatus(), reservation.getQuantity());
+            
+            // 2. Validate state
+            if (reservation.getStatus() != ReservationStatus.RESERVED) {
+                throw new InvalidReservationStateException(
+                    command.reservationId(),
+                    reservation.getStatus(),
+                    ReservationStatus.RESERVED
+                );
+            }
+            
+            // 3. Check expiration
+            if (expirationPolicy.isExpired(reservation)) {
+                throw new ReservationExpiredException(
+                    command.reservationId(),
+                    reservation.getExpiresAt(),
+                    15
+                );
+            }
+            
+            // 4. Load inventory with lock
+            Inventory inventory = inventoryRepository
+                .findByStoreIdAndSkuWithLock(
+                    reservation.getStoreId(),
+                    reservation.getSku()
+                )
+                .orElseThrow(() -> new ProductNotFoundException(
+                    reservation.getSku(),
+                    reservation.getStoreId()
+                ));
+            
+            // 5. Execute domain operation (reserved → sold)
+            inventory.commit(reservation.getQuantity());
+            
+            // 6. Update reservation status
+            Reservation committedReservation = reservation.withStatus(
+                ReservationStatus.COMMITTED
+            );
+            
+            // 7. Persist
+            inventoryRepository.save(inventory);
+            reservationRepository.save(committedReservation);
+            
+            // 8. Create and publish event
+            StockCommittedEvent event = StockCommittedEvent.create(
+                command.reservationId(),
+                reservation.getStoreId(),
+                reservation.getSku(),
+                reservation.getQuantity(),
+                reservation.getCustomerId()
+            );
+            
+            eventStore.store(event);
+            eventPublisher.publish(event);
+            
+            log.info("✅ Reservation committed successfully - orderId: {}", 
+                command.orderId());
+            
+            return Result.success(command.orderId());
+            
+        } catch (DomainException ex) {
+            log.error("❌ Domain error during commit: {}", ex.getMessage(), ex);
+            return Result.failure(DomainError.from(ex));
+            
+        } catch (Exception ex) {
+            log.error("❌ Unexpected error during commit", ex);
+            return Result.failure(DomainError.of(
+                "INTERNAL_ERROR",
+                "An unexpected error occurred"
+            ));
+        }
+    }
+}
+
+CARACTERÍSTICAS:
+✅ Valida status da reserva
+✅ Verifica expiração
+✅ Pessimistic lock no inventory
+✅ Atualiza reservation para COMMITTED
+✅ Publica StockCommittedEvent
+
+====================================================================================================================
+
+## **📋 PROMPT 10: Application Services - ReleaseStockService e QueryStockService**
+```
+Crie ReleaseStockService e QueryStockService no pacote application/service/.
+
+ARQUIVOS A CRIAR:
+
+1. ReleaseStockService.java
+
+package com.inventory.application.service;
+
+import com.inventory.application.port.input.*;
+import com.inventory.application.port.output.*;
+import com.inventory.domain.event.StockReleasedEvent;
+import com.inventory.domain.exception.*;
+import com.inventory.domain.model.*;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@Transactional
+@RequiredArgsConstructor
+@Slf4j
+public class ReleaseStockService implements ReleaseStockUseCase {
+    
+    private final InventoryRepository inventoryRepository;
+    private final ReservationRepository reservationRepository;
+    private final EventPublisher eventPublisher;
+    private final EventStore eventStore;
+    
+    @Override
+    public Result<Void, DomainError> release(ReleaseStockCommand command) {
+        
+        log.info("Releasing reservation: {}, reason: {}", 
+            command.reservationId(), command.reason());
+        
+        try {
+            // 1. Load reservation
+            Reservation reservation = reservationRepository
+                .findById(command.reservationId())
+                .orElseThrow(() -> new ReservationNotFoundException(
+                    command.reservationId()
+                ));
+            
+            // 2. Validate can be released
+            if (reservation.getStatus() == ReservationStatus.COMMITTED) {
+                throw new InvalidReservationStateException(
+                    command.reservationId(),
+                    reservation.getStatus(),
+                    ReservationStatus.RESERVED
+                );
+            }
+            
+            // 3. Load inventory with lock
+            Inventory inventory = inventoryRepository
+                .findByStoreIdAndSkuWithLock(
+                    reservation.getStoreId(),
+                    reservation.getSku()
+                )
+                .orElseThrow(() -> new ProductNotFoundException(
+                    reservation.getSku(),
+                    reservation.getStoreId()
+                ));
+            
+            // 4. Execute domain operation (return to available)
+            inventory.release(reservation.getQuantity());
+            
+            // 5. Update reservation
+            Reservation releasedReservation = reservation.withStatus(
+                ReservationStatus.CANCELLED
+            );
+            
+            // 6. Persist
+            inventoryRepository.save(inventory);
+            reservationRepository.save(releasedReservation);
+            
+            // 7. Create and publish event
+            StockReleasedEvent event = StockReleasedEvent.create(
+                command.reservationId(),
+                reservation.getStoreId(),
+                reservation.getSku(),
+                reservation.getQuantity(),
+                command.reason()
+            );
+            
+            eventStore.store(event);
+            eventPublisher.publish(event);
+            
+            log.info("✅ Reservation released successfully");
+            
+            return Result.success(null);
+            
+        } catch (DomainException ex) {
+            log.error("❌ Domain error during release: {}", ex.getMessage(), ex);
+            return Result.failure(DomainError.from(ex));
+            
+        } catch (Exception ex) {
+            log.error("❌ Unexpected error during release", ex);
+            return Result.failure(DomainError.of(
+                "INTERNAL_ERROR",
+                "An unexpected error occurred"
+            ));
+        }
+    }
+}
+
+2. QueryStockService.java
+
+package com.inventory.application.service;
+
+import com.inventory.application.port.input.InventoryView;
+import com.inventory.application.port.input.QueryStockUseCase;
+import com.inventory.application.port.output.InventoryRepository;
+import com.inventory.domain.model.Sku;
+import com.inventory.domain.model.StoreId;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.Optional;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class QueryStockService implements QueryStockUseCase {
+    
+    private final InventoryRepository inventoryRepository;
+    
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<InventoryView> findByStoreAndSku(StoreId storeId, Sku sku) {
+        
+        log.debug("Querying stock - store: {}, sku: {}", storeId, sku);
+        
+        return inventoryRepository
+            .findByStoreIdAndSku(storeId, sku)
+            .map(inventory -> {
+                log.debug("Inventory found - available: {}", 
+                    inventory.availableStock());
+                return InventoryView.from(inventory);
+            });
+    }
+}
+
+CARACTERÍSTICAS:
+✅ ReleaseStockService libera estoque reservado
+✅ Atualiza reservation para CANCELLED
+✅ Publica StockReleasedEvent
+✅ QueryStockService usa @Transactional(readOnly = true)
+✅ Converte Inventory → InventoryView
+
+===================================================================================================================
+
+## **📋 PROMPT 11: Output Adapter - Persistence (JPA Entities)**
+```
+Crie as JPA Entities no pacote adapters/output/persistence/entity/.
+
+IMPORTANTE:
+- Entidades JPA (anotações @Entity, @Table)
+- Mapeamento de Value Objects para tipos primitivos
+- Relacionamentos se necessário
+
+ARQUIVOS A CRIAR:
+
+1. InventoryEntity.java
+
+package com.inventory.adapters.output.persistence.entity;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "inventory", uniqueConstraints = {
+    @UniqueConstraint(columnNames = {"store_id", "sku"})
+})
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class InventoryEntity {
+    
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @Column(name = "store_id", nullable = false, length = 50)
+    private String storeId;
+    
+    @Column(name = "sku", nullable = false, length = 20)
+    private String sku;
+    
+    @Column(name = "product_name", nullable = false, length = 200)
+    private String productName;
+    
+    @Column(name = "available_stock", nullable = false)
+    private Integer availableStock;
+    
+    @Column(name = "reserved_stock", nullable = false)
+    private Integer reservedStock;
+    
+    @Column(name = "sold_stock", nullable = false)
+    private Integer soldStock;
+    
+    @Column(name = "last_updated", nullable = false)
+    private LocalDateTime lastUpdated;
+    
+    @Version
+    private Long version; // Optimistic locking support
+}
+
+2. ReservationEntity.java
+
+package com.inventory.adapters.output.persistence.entity;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "reservations", indexes = {
+    @Index(name = "idx_status", columnList = "status"),
+    @Index(name = "idx_expires_at", columnList = "expires_at")
+})
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ReservationEntity {
+    
+    @Id
+    @Column(length = 50)
+    private String id;
+    
+    @Column(name = "store_id", nullable = false, length = 50)
+    private String storeId;
+    
+    @Column(name = "sku", nullable = false, length = 20)
+    private String sku;
+    
+    @Column(name = "quantity", nullable = false)
+    private Integer quantity;
+    
+    @Column(name = "customer_id", nullable = false, length = 50)
+    private String customerId;
+    
+    @Column(name = "status", nullable = false, length = 20)
+    @Enumerated(EnumType.STRING)
+    private ReservationStatusEntity status;
+    
+    @Column(name = "created_at", nullable = false)
+    private LocalDateTime createdAt;
+    
+    @Column(name = "expires_at", nullable = false)
+    private LocalDateTime expiresAt;
+    
+    @Column(name = "committed_at")
+    private LocalDateTime committedAt;
+}
+
+3. ReservationStatusEntity.java (Enum)
+
+package com.inventory.adapters.output.persistence.entity;
+
+public enum ReservationStatusEntity {
+    RESERVED,
+    COMMITTED,
+    EXPIRED,
+    CANCELLED
+}
+
+4. EventEntity.java
+
+package com.inventory.adapters.output.persistence.entity;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "domain_events", indexes = {
+    @Index(name = "idx_aggregate_id", columnList = "aggregate_id"),
+    @Index(name = "idx_event_type", columnList = "event_type"),
+    @Index(name = "idx_timestamp", columnList = "timestamp")
+})
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class EventEntity {
+    
+    @Id
+    @Column(length = 50)
+    private String eventId;
+    
+    @Column(name = "event_type", nullable = false, length = 50)
+    private String eventType;
+    
+    @Column(name = "aggregate_id", nullable = false, length = 50)
+    private String aggregateId;
+    
+    @Column(name = "aggregate_type", nullable = false, length = 50)
+    private String aggregateType;
+    
+    @Column(name = "payload", nullable = false, columnDefinition = "TEXT")
+    private String payload;
+    
+    @Column(name = "metadata", columnDefinition = "TEXT")
+    private String metadata;
+    
+    @Column(name = "timestamp", nullable = false)
+    private LocalDateTime timestamp;
+    
+    @Column(name = "version", nullable = false)
+    private Integer version;
+}
+
+CARACTERÍSTICAS:
+✅ Anotações JPA (@Entity, @Table, @Column)
+✅ Unique constraints onde necessário
+✅ Indexes para queries frequentes
+✅ @Version para optimistic locking
+✅ Enums como STRING
+✅ TEXT para JSONs (payload)
+
+===================================================================================================================
+
+## **📋 PROMPT 12: Output Adapter - JPA Repositories**
+```
+Crie os JPA Repositories no pacote adapters/output/persistence/repository/.
+
+ARQUIVOS A CRIAR:
+
+1. InventoryJpaRepository.java
+
+package com.inventory.adapters.output.persistence.repository;
+
+import com.inventory.adapters.output.persistence.entity.InventoryEntity;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+
+@Repository
+public interface InventoryJpaRepository extends JpaRepository<InventoryEntity, Long> {
+    
+    Optional<InventoryEntity> findByStoreIdAndSku(String storeId, String sku);
+    
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT i FROM InventoryEntity i WHERE i.storeId = :storeId AND i.sku = :sku")
+    Optional<InventoryEntity> findByStoreIdAndSkuWithLock(
+        @Param("storeId") String storeId, 
+        @Param("sku") String sku
+    );
+    
+    boolean existsByStoreIdAndSku(String storeId, String sku);
+}
+
+2. ReservationJpaRepository.java
+
+package com.inventory.adapters.output.persistence.repository;
+
+import com.inventory.adapters.output.persistence.entity.ReservationEntity;
+import com.inventory.adapters.output.persistence.entity.ReservationStatusEntity;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Repository
+public interface ReservationJpaRepository extends JpaRepository<ReservationEntity, String> {
+    
+    List<ReservationEntity> findByStatus(ReservationStatusEntity status);
+    
+    @Query("SELECT r FROM ReservationEntity r WHERE r.status = 'RESERVED' AND r.expiresAt < :before")
+    List<ReservationEntity> findExpiredReservations(@Param("before") LocalDateTime before);
+}
+
+3. EventJpaRepository.java
+
+package com.inventory.adapters.output.persistence.repository;
+
+import com.inventory.adapters.output.persistence.entity.EventEntity;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Repository
+public interface EventJpaRepository extends JpaRepository<EventEntity, String> {
+    
+    List<EventEntity> findByAggregateIdOrderByTimestampAsc(String aggregateId);
+    
+    @Query("SELECT e FROM EventEntity e WHERE e.aggregateId = :aggregateId " +
+           "AND e.timestamp BETWEEN :from AND :to ORDER BY e.timestamp ASC")
+    List<EventEntity> findByAggregateIdAndTimestampBetween(
+        @Param("aggregateId") String aggregateId,
+        @Param("from") LocalDateTime from,
+        @Param("to") LocalDateTime to
+    );
+    
+    List<EventEntity> findByEventTypeOrderByTimestampDesc(String eventType);
+}
+
+CARACTERÍSTICAS:
+✅ Extends JpaRepository
+✅ Query methods (findBy...)
+✅ @Lock para pessimistic locking
+✅ @Query customizadas
+✅ Ordenação (OrderBy)
