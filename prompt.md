@@ -344,6 +344,8 @@ IMPORTANTE:
 
 ===============================================================================================================
 
+## **📋 PROMPT 2: Domain Model - Value Objects**
+
 Crie os Value Objects no pacote domain/model/.
 
 IMPORTANTE:
@@ -925,3 +927,206 @@ CARACTERÍSTICAS:
 ✅ Factory methods (create)
 ✅ Validações no construtor compacto
 ✅ UUID gerado automaticamente
+
+===================================================================================================================
+
+📋 PROMPT 5: Domain ExceptionsCrie a hierarquia de Domain Exceptions no pacote domain/exception/.
+
+IMPORTANTE:
+- Exceções devem conter informações ricas para debugging
+- Incluir código de erro e detalhes estruturados
+- Base exception abstrata
+
+ARQUIVOS A CRIAR:
+
+1. DomainException.java (Base abstrata)
+
+package com.inventory.domain.exception;
+
+import java.util.Map;
+import lombok.Getter;
+
+@Getter
+public abstract class DomainException extends RuntimeException {
+    
+    private final String code;
+    private final Map<String, Object> details;
+    
+    protected DomainException(String code, String message, Map<String, Object> details) {
+        super(message);
+        this.code = code;
+        this.details = details != null ? details : Map.of();
+    }
+    
+    protected DomainException(String code, String message) {
+        this(code, message, Map.of());
+    }
+}
+
+2. InsufficientStockException.java
+
+package com.inventory.domain.exception;
+
+import com.inventory.domain.model.Sku;
+import com.inventory.domain.model.StoreId;
+import lombok.Getter;
+import java.util.Map;
+
+@Getter
+public class InsufficientStockException extends DomainException {
+    
+    private final Sku sku;
+    private final int requestedQuantity;
+    private final int availableQuantity;
+    private final StoreId storeId;
+    
+    public InsufficientStockException(
+            Sku sku, 
+            int requestedQuantity, 
+            int availableQuantity,
+            StoreId storeId) {
+        super(
+            "INSUFFICIENT_STOCK",
+            String.format(
+                "Insufficient stock for %s. Requested: %d, Available: %d",
+                sku.value(), requestedQuantity, availableQuantity
+            ),
+            Map.of(
+                "sku", sku.value(),
+                "requested", requestedQuantity,
+                "available", availableQuantity,
+                "storeId", storeId.value()
+            )
+        );
+        this.sku = sku;
+        this.requestedQuantity = requestedQuantity;
+        this.availableQuantity = availableQuantity;
+        this.storeId = storeId;
+    }
+}
+
+3. ReservationNotFoundException.java
+
+package com.inventory.domain.exception;
+
+import java.util.Map;
+
+public class ReservationNotFoundException extends DomainException {
+    
+    public ReservationNotFoundException(String reservationId) {
+        super(
+            "RESERVATION_NOT_FOUND",
+            String.format("Reservation not found: %s", reservationId),
+            Map.of("reservationId", reservationId)
+        );
+    }
+}
+
+4. ReservationExpiredException.java
+
+package com.inventory.domain.exception;
+
+import lombok.Getter;
+import java.time.LocalDateTime;
+import java.util.Map;
+
+@Getter
+public class ReservationExpiredException extends DomainException {
+    
+    private final String reservationId;
+    private final LocalDateTime expiredAt;
+    
+    public ReservationExpiredException(
+            String reservationId, 
+            LocalDateTime expiredAt,
+            int ttlMinutes) {
+        super(
+            "RESERVATION_EXPIRED",
+            String.format("Reservation %s expired at %s", reservationId, expiredAt),
+            Map.of(
+                "reservationId", reservationId,
+                "expiredAt", expiredAt.toString(),
+                "ttlMinutes", ttlMinutes
+            )
+        );
+        this.reservationId = reservationId;
+        this.expiredAt = expiredAt;
+    }
+}
+
+5. InvalidReservationStateException.java
+
+package com.inventory.domain.exception;
+
+import com.inventory.domain.model.ReservationStatus;
+import java.util.Map;
+
+public class InvalidReservationStateException extends DomainException {
+    
+    public InvalidReservationStateException(
+            String reservationId,
+            ReservationStatus currentState,
+            ReservationStatus expectedState) {
+        super(
+            "INVALID_RESERVATION_STATE",
+            String.format(
+                "Invalid state for reservation %s. Current: %s, Expected: %s",
+                reservationId, currentState, expectedState
+            ),
+            Map.of(
+                "reservationId", reservationId,
+                "currentState", currentState.toString(),
+                "expectedState", expectedState.toString()
+            )
+        );
+    }
+}
+
+6. ProductNotFoundException.java
+
+package com.inventory.domain.exception;
+
+import com.inventory.domain.model.Sku;
+import com.inventory.domain.model.StoreId;
+import java.util.Map;
+
+public class ProductNotFoundException extends DomainException {
+    
+    public ProductNotFoundException(Sku sku, StoreId storeId) {
+        super(
+            "PRODUCT_NOT_FOUND",
+            String.format("Product %s not found in store %s", sku.value(), storeId.value()),
+            Map.of(
+                "sku", sku.value(),
+                "storeId", storeId.value()
+            )
+        );
+    }
+}
+
+7. InvalidStockOperationException.java
+
+package com.inventory.domain.exception;
+
+import java.util.Map;
+
+public class InvalidStockOperationException extends DomainException {
+    
+    public InvalidStockOperationException(String operation, String reason) {
+        super(
+            "INVALID_STOCK_OPERATION",
+            String.format("Invalid stock operation: %s. Reason: %s", operation, reason),
+            Map.of(
+                "operation", operation,
+                "reason", reason
+            )
+        );
+    }
+}
+
+CARACTERÍSTICAS:
+✅ Hierarquia clara com base abstrata
+✅ Código de erro padronizado
+✅ Detalhes estruturados (Map)
+✅ Mensagens descritivas
+✅ Campos específicos com @Getter
