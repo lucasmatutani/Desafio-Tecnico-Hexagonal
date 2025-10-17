@@ -343,3 +343,585 @@ IMPORTANTE:
 - pom.xml com TODAS as dependências necessárias
 
 ===============================================================================================================
+
+Crie os Value Objects no pacote domain/model/.
+
+IMPORTANTE:
+- Value Objects são IMUTÁVEIS (use Java Records)
+- Validações no construtor compacto
+- Factory methods para criação
+- toString() customizado
+
+ARQUIVOS A CRIAR:
+
+1. StoreId.java
+
+package com.inventory.domain.model;
+
+import java.util.Objects;
+
+public record StoreId(String value) {
+    
+    public StoreId {
+        Objects.requireNonNull(value, "StoreId cannot be null");
+        if (value.isBlank()) {
+            throw new IllegalArgumentException("StoreId cannot be empty");
+        }
+        if (value.length() > 50) {
+            throw new IllegalArgumentException("StoreId too long (max 50 chars)");
+        }
+    }
+    
+    public static StoreId of(String value) {
+        return new StoreId(value);
+    }
+    
+    @Override
+    public String toString() {
+        return value;
+    }
+}
+
+2. Sku.java
+
+package com.inventory.domain.model;
+
+import java.util.Objects;
+import java.util.regex.Pattern;
+
+public record Sku(String value) {
+    
+    private static final Pattern SKU_PATTERN = Pattern.compile("^SKU\\d{3,6}$");
+    
+    public Sku {
+        Objects.requireNonNull(value, "SKU cannot be null");
+        if (!SKU_PATTERN.matcher(value).matches()) {
+            throw new IllegalArgumentException(
+                "SKU must be in format 'SKU' followed by 3-6 digits (e.g., SKU123)"
+            );
+        }
+    }
+    
+    public static Sku of(String value) {
+        return new Sku(value);
+    }
+    
+    @Override
+    public String toString() {
+        return value;
+    }
+}
+
+3. Stock.java
+
+package com.inventory.domain.model;
+
+public record Stock(
+    int availableStock,
+    int reservedStock,
+    int soldStock
+) {
+    
+    public Stock {
+        if (availableStock < 0) {
+            throw new IllegalArgumentException("Available stock cannot be negative");
+        }
+        if (reservedStock < 0) {
+            throw new IllegalArgumentException("Reserved stock cannot be negative");
+        }
+        if (soldStock < 0) {
+            throw new IllegalArgumentException("Sold stock cannot be negative");
+        }
+    }
+    
+    public static Stock empty() {
+        return new Stock(0, 0, 0);
+    }
+    
+    public static Stock withAvailable(int quantity) {
+        return new Stock(quantity, 0, 0);
+    }
+    
+    public Stock reserve(int quantity) {
+        if (quantity > availableStock) {
+            throw new IllegalArgumentException(
+                String.format("Cannot reserve %d units. Only %d available", 
+                    quantity, availableStock)
+            );
+        }
+        return new Stock(
+            availableStock - quantity,
+            reservedStock + quantity,
+            soldStock
+        );
+    }
+    
+    public Stock commit(int quantity) {
+        if (quantity > reservedStock) {
+            throw new IllegalArgumentException(
+                String.format("Cannot commit %d units. Only %d reserved", 
+                    quantity, reservedStock)
+            );
+        }
+        return new Stock(
+            availableStock,
+            reservedStock - quantity,
+            soldStock + quantity
+        );
+    }
+    
+    public Stock release(int quantity) {
+        if (quantity > reservedStock) {
+            throw new IllegalArgumentException(
+                String.format("Cannot release %d units. Only %d reserved", 
+                    quantity, reservedStock)
+            );
+        }
+        return new Stock(
+            availableStock + quantity,
+            reservedStock - quantity,
+            soldStock
+        );
+    }
+    
+    public int totalStock() {
+        return availableStock + reservedStock;
+    }
+    
+    public boolean hasAvailableStock(int quantity) {
+        return availableStock >= quantity;
+    }
+}
+
+4. ReservationId.java
+
+package com.inventory.domain.model;
+
+import java.util.Objects;
+import java.util.UUID;
+
+public record ReservationId(String value) {
+    
+    public ReservationId {
+        Objects.requireNonNull(value, "ReservationId cannot be null");
+        if (value.isBlank()) {
+            throw new IllegalArgumentException("ReservationId cannot be empty");
+        }
+    }
+    
+    public static ReservationId generate() {
+        return new ReservationId("RES-" + UUID.randomUUID().toString());
+    }
+    
+    public static ReservationId of(String value) {
+        return new ReservationId(value);
+    }
+    
+    @Override
+    public String toString() {
+        return value;
+    }
+}
+
+5. ReservationStatus.java (Enum)
+
+package com.inventory.domain.model;
+
+public enum ReservationStatus {
+    RESERVED,
+    COMMITTED,
+    EXPIRED,
+    CANCELLED
+}
+
+CARACTERÍSTICAS:
+✅ Todos são imutáveis (records)
+✅ Validações no construtor compacto
+✅ Factory methods (of, generate)
+✅ toString() customizado
+✅ Stock tem lógica de negócio
+
+===============================================================================================================
+
+## **📋 PROMPT 3: Domain Model - Entities (Inventory e Reservation)**
+```
+Crie as Entities no pacote domain/model/.
+
+IMPORTANTE:
+- Inventory é o AGGREGATE ROOT
+- Use Lombok (@Data, @Builder)
+- Métodos de negócio retornam resultados
+- Validações dentro dos métodos
+
+ARQUIVOS A CRIAR:
+
+1. Inventory.java (Aggregate Root)
+
+package com.inventory.domain.model;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import java.time.LocalDateTime;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class Inventory {
+    
+    private Long id;
+    private StoreId storeId;
+    private Sku sku;
+    private String productName;
+    private Stock stock;
+    private LocalDateTime lastUpdated;
+    
+    public void reserve(int quantity) {
+        this.stock = stock.reserve(quantity);
+        this.lastUpdated = LocalDateTime.now();
+    }
+    
+    public void commit(int quantity) {
+        this.stock = stock.commit(quantity);
+        this.lastUpdated = LocalDateTime.now();
+    }
+    
+    public void release(int quantity) {
+        this.stock = stock.release(quantity);
+        this.lastUpdated = LocalDateTime.now();
+    }
+    
+    public void addStock(int quantity) {
+        if (quantity <= 0) {
+            throw new IllegalArgumentException("Quantity must be positive");
+        }
+        this.stock = new Stock(
+            stock.availableStock() + quantity,
+            stock.reservedStock(),
+            stock.soldStock()
+        );
+        this.lastUpdated = LocalDateTime.now();
+    }
+    
+    public boolean hasAvailableStock(int quantity) {
+        return stock.hasAvailableStock(quantity);
+    }
+    
+    public int availableStock() {
+        return stock.availableStock();
+    }
+    
+    public int reservedStock() {
+        return stock.reservedStock();
+    }
+    
+    public int soldStock() {
+        return stock.soldStock();
+    }
+}
+
+2. Reservation.java (Entity)
+
+package com.inventory.domain.model;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import java.time.LocalDateTime;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class Reservation {
+    
+    private String id;
+    private StoreId storeId;
+    private Sku sku;
+    private int quantity;
+    private String customerId;
+    private ReservationStatus status;
+    private LocalDateTime createdAt;
+    private LocalDateTime expiresAt;
+    private LocalDateTime committedAt;
+    
+    public boolean isExpired() {
+        return LocalDateTime.now().isAfter(expiresAt);
+    }
+    
+    public boolean canBeCommitted() {
+        return status == ReservationStatus.RESERVED && !isExpired();
+    }
+    
+    public boolean canBeReleased() {
+        return status == ReservationStatus.RESERVED;
+    }
+    
+    public Reservation withStatus(ReservationStatus newStatus) {
+        return Reservation.builder()
+            .id(this.id)
+            .storeId(this.storeId)
+            .sku(this.sku)
+            .quantity(this.quantity)
+            .customerId(this.customerId)
+            .status(newStatus)
+            .createdAt(this.createdAt)
+            .expiresAt(this.expiresAt)
+            .committedAt(newStatus == ReservationStatus.COMMITTED 
+                ? LocalDateTime.now() 
+                : this.committedAt)
+            .build();
+    }
+}
+
+3. ReservationResult.java (Value Object para retorno)
+
+package com.inventory.domain.model;
+
+import com.inventory.domain.event.DomainEvent;
+import java.util.List;
+
+public record ReservationResult(
+    ReservationId reservationId,
+    Reservation reservation,
+    List<DomainEvent> events
+) {
+}
+
+CARACTERÍSTICAS:
+✅ Inventory é Aggregate Root
+✅ Métodos de negócio (reserve, commit, release)
+✅ Validações nos métodos
+✅ Immutability helpers (withStatus)
+✅ Métodos de consulta
+
+===============================================================================================================
+
+## **📋 PROMPT 4: Domain Events**
+```
+Crie os Domain Events no pacote domain/event/.
+
+IMPORTANTE:
+- Todos os eventos são IMUTÁVEIS (Java Records)
+- Interface base DomainEvent
+- Factory methods para criação
+- Inclui timestamp e eventId
+
+ARQUIVOS A CRIAR:
+
+1. DomainEvent.java (Interface)
+
+package com.inventory.domain.event;
+
+import java.time.LocalDateTime;
+
+public interface DomainEvent {
+    String eventId();
+    String eventType();
+    LocalDateTime timestamp();
+    String aggregateId();
+}
+
+2. StockReservedEvent.java
+
+package com.inventory.domain.event;
+
+import com.inventory.domain.model.Sku;
+import com.inventory.domain.model.StoreId;
+import java.time.LocalDateTime;
+import java.util.Objects;
+import java.util.UUID;
+
+public record StockReservedEvent(
+    String eventId,
+    String eventType,
+    LocalDateTime timestamp,
+    String aggregateId,
+    String reservationId,
+    StoreId storeId,
+    Sku sku,
+    int quantity,
+    String customerId
+) implements DomainEvent {
+    
+    public StockReservedEvent {
+        Objects.requireNonNull(eventId, "eventId cannot be null");
+        Objects.requireNonNull(storeId, "storeId cannot be null");
+        Objects.requireNonNull(sku, "sku cannot be null");
+        if (quantity <= 0) {
+            throw new IllegalArgumentException("quantity must be positive");
+        }
+    }
+    
+    public static StockReservedEvent create(
+            String reservationId,
+            StoreId storeId,
+            Sku sku,
+            int quantity,
+            String customerId) {
+        return new StockReservedEvent(
+            UUID.randomUUID().toString(),
+            "StockReserved",
+            LocalDateTime.now(),
+            sku.value(),
+            reservationId,
+            storeId,
+            sku,
+            quantity,
+            customerId
+        );
+    }
+}
+
+3. StockCommittedEvent.java
+
+package com.inventory.domain.event;
+
+import com.inventory.domain.model.Sku;
+import com.inventory.domain.model.StoreId;
+import java.time.LocalDateTime;
+import java.util.Objects;
+import java.util.UUID;
+
+public record StockCommittedEvent(
+    String eventId,
+    String eventType,
+    LocalDateTime timestamp,
+    String aggregateId,
+    String reservationId,
+    StoreId storeId,
+    Sku sku,
+    int quantity,
+    String customerId
+) implements DomainEvent {
+    
+    public StockCommittedEvent {
+        Objects.requireNonNull(eventId, "eventId cannot be null");
+        Objects.requireNonNull(reservationId, "reservationId cannot be null");
+        Objects.requireNonNull(storeId, "storeId cannot be null");
+        Objects.requireNonNull(sku, "sku cannot be null");
+    }
+    
+    public static StockCommittedEvent create(
+            String reservationId,
+            StoreId storeId,
+            Sku sku,
+            int quantity,
+            String customerId) {
+        return new StockCommittedEvent(
+            UUID.randomUUID().toString(),
+            "StockCommitted",
+            LocalDateTime.now(),
+            sku.value(),
+            reservationId,
+            storeId,
+            sku,
+            quantity,
+            customerId
+        );
+    }
+}
+
+4. StockReleasedEvent.java
+
+package com.inventory.domain.event;
+
+import com.inventory.domain.model.Sku;
+import com.inventory.domain.model.StoreId;
+import java.time.LocalDateTime;
+import java.util.Objects;
+import java.util.UUID;
+
+public record StockReleasedEvent(
+    String eventId,
+    String eventType,
+    LocalDateTime timestamp,
+    String aggregateId,
+    String reservationId,
+    StoreId storeId,
+    Sku sku,
+    int quantity,
+    String reason
+) implements DomainEvent {
+    
+    public StockReleasedEvent {
+        Objects.requireNonNull(eventId, "eventId cannot be null");
+        Objects.requireNonNull(sku, "sku cannot be null");
+    }
+    
+    public static StockReleasedEvent create(
+            String reservationId,
+            StoreId storeId,
+            Sku sku,
+            int quantity,
+            String reason) {
+        return new StockReleasedEvent(
+            UUID.randomUUID().toString(),
+            "StockReleased",
+            LocalDateTime.now(),
+            sku.value(),
+            reservationId,
+            storeId,
+            sku,
+            quantity,
+            reason
+        );
+    }
+}
+
+5. StockAddedEvent.java
+
+package com.inventory.domain.event;
+
+import com.inventory.domain.model.Sku;
+import com.inventory.domain.model.StoreId;
+import java.time.LocalDateTime;
+import java.util.Objects;
+import java.util.UUID;
+
+public record StockAddedEvent(
+    String eventId,
+    String eventType,
+    LocalDateTime timestamp,
+    String aggregateId,
+    StoreId storeId,
+    Sku sku,
+    int quantity,
+    String reason
+) implements DomainEvent {
+    
+    public StockAddedEvent {
+        Objects.requireNonNull(eventId, "eventId cannot be null");
+        Objects.requireNonNull(sku, "sku cannot be null");
+        if (quantity <= 0) {
+            throw new IllegalArgumentException("quantity must be positive");
+        }
+    }
+    
+    public static StockAddedEvent create(
+            StoreId storeId,
+            Sku sku,
+            int quantity,
+            String reason) {
+        return new StockAddedEvent(
+            UUID.randomUUID().toString(),
+            "StockAdded",
+            LocalDateTime.now(),
+            sku.value(),
+            storeId,
+            sku,
+            quantity,
+            reason
+        );
+    }
+}
+
+CARACTERÍSTICAS:
+✅ Todos implementam DomainEvent
+✅ Imutáveis (records)
+✅ Factory methods (create)
+✅ Validações no construtor compacto
+✅ UUID gerado automaticamente
