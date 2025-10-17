@@ -2390,3 +2390,728 @@ CARACTERÍSTICAS:
 ✅ @Lock para pessimistic locking
 ✅ @Query customizadas
 ✅ Ordenação (OrderBy)
+
+======================================================================================
+
+PROMPT 13: Persistence Mappers
+Crie os Mappers no pacote adapters/output/persistence/mapper/.
+
+IMPORTANTE:
+- Mappers convertem Domain ↔ JPA Entity
+- Use MapStruct para geração automática
+- Métodos para Value Objects
+
+ARQUIVOS A CRIAR:
+
+1. InventoryPersistenceMapper.java
+
+package com.inventory.adapters.output.persistence.mapper;
+
+import com.inventory.adapters.output.persistence.entity.InventoryEntity;
+import com.inventory.domain.model.*;
+import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
+import org.mapstruct.Named;
+
+@Mapper(componentModel = "spring")
+public interface InventoryPersistenceMapper {
+    
+    @Mapping(target = "storeId", source = "storeId", qualifiedByName = "storeIdToString")
+    @Mapping(target = "sku", source = "sku", qualifiedByName = "skuToString")
+    @Mapping(target = "availableStock", source = "stock", qualifiedByName = "stockToAvailable")
+    @Mapping(target = "reservedStock", source = "stock", qualifiedByName = "stockToReserved")
+    @Mapping(target = "soldStock", source = "stock", qualifiedByName = "stockToSold")
+    @Mapping(target = "version", ignore = true)
+    InventoryEntity toEntity(Inventory domain);
+    
+    @Mapping(target = "storeId", source = "storeId", qualifiedByName = "stringToStoreId")
+    @Mapping(target = "sku", source = "sku", qualifiedByName = "stringToSku")
+    @Mapping(target = "stock", expression = "java(mapToStock(entity))")
+    Inventory toDomain(InventoryEntity entity);
+    
+    // Value Object conversions
+    @Named("storeIdToString")
+    default String storeIdToString(StoreId storeId) {
+        return storeId != null ? storeId.value() : null;
+    }
+    
+    @Named("stringToStoreId")
+    default StoreId stringToStoreId(String storeId) {
+        return storeId != null ? StoreId.of(storeId) : null;
+    }
+    
+    @Named("skuToString")
+    default String skuToString(Sku sku) {
+        return sku != null ? sku.value() : null;
+    }
+    
+    @Named("stringToSku")
+    default Sku stringToSku(String sku) {
+        return sku != null ? Sku.of(sku) : null;
+    }
+    
+    @Named("stockToAvailable")
+    default Integer stockToAvailable(Stock stock) {
+        return stock != null ? stock.availableStock() : 0;
+    }
+    
+    @Named("stockToReserved")
+    default Integer stockToReserved(Stock stock) {
+        return stock != null ? stock.reservedStock() : 0;
+    }
+    
+    @Named("stockToSold")
+    default Integer stockToSold(Stock stock) {
+        return stock != null ? stock.soldStock() : 0;
+    }
+    
+    default Stock mapToStock(InventoryEntity entity) {
+        return new Stock(
+            entity.getAvailableStock(),
+            entity.getReservedStock(),
+            entity.getSoldStock()
+        );
+    }
+}
+
+2. ReservationPersistenceMapper.java
+
+package com.inventory.adapters.output.persistence.mapper;
+
+import com.inventory.adapters.output.persistence.entity.ReservationEntity;
+import com.inventory.adapters.output.persistence.entity.ReservationStatusEntity;
+import com.inventory.domain.model.*;
+import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
+import org.mapstruct.Named;
+
+@Mapper(componentModel = "spring")
+public interface ReservationPersistenceMapper {
+    
+    @Mapping(target = "storeId", source = "storeId", qualifiedByName = "storeIdToString")
+    @Mapping(target = "sku", source = "sku", qualifiedByName = "skuToString")
+    @Mapping(target = "status", source = "status", qualifiedByName = "statusToEntity")
+    ReservationEntity toEntity(Reservation domain);
+    
+    @Mapping(target = "storeId", source = "storeId", qualifiedByName = "stringToStoreId")
+    @Mapping(target = "sku", source = "sku", qualifiedByName = "stringToSku")
+    @Mapping(target = "status", source = "status", qualifiedByName = "entityToStatus")
+    Reservation toDomain(ReservationEntity entity);
+    
+    @Named("storeIdToString")
+    default String storeIdToString(StoreId storeId) {
+        return storeId != null ? storeId.value() : null;
+    }
+    
+    @Named("stringToStoreId")
+    default StoreId stringToStoreId(String storeId) {
+        return storeId != null ? StoreId.of(storeId) : null;
+    }
+    
+    @Named("skuToString")
+    default String skuToString(Sku sku) {
+        return sku != null ? sku.value() : null;
+    }
+    
+    @Named("stringToSku")
+    default Sku stringToSku(String sku) {
+        return sku != null ? Sku.of(sku) : null;
+    }
+    
+    @Named("statusToEntity")
+    default ReservationStatusEntity statusToEntity(ReservationStatus status) {
+        return status != null ? ReservationStatusEntity.valueOf(status.name()) : null;
+    }
+    
+    @Named("entityToStatus")
+    default ReservationStatus entityToStatus(ReservationStatusEntity status) {
+        return status != null ? ReservationStatus.valueOf(status.name()) : null;
+    }
+}
+
+3. EventPersistenceMapper.java
+
+package com.inventory.adapters.output.persistence.mapper;
+
+import com.inventory.adapters.output.persistence.entity.EventEntity;
+import com.inventory.domain.event.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Component;
+
+@Component
+@RequiredArgsConstructor
+public class EventPersistenceMapper {
+    
+    private final ObjectMapper objectMapper;
+    
+    public EventEntity toEntity(DomainEvent event) {
+        try {
+            String payload = objectMapper.writeValueAsString(event);
+            
+            return EventEntity.builder()
+                .eventId(event.eventId())
+                .eventType(event.eventType())
+                .aggregateId(event.aggregateId())
+                .aggregateType("Inventory")
+                .payload(payload)
+                .timestamp(event.timestamp())
+                .version(1)
+                .build();
+                
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to serialize event", e);
+        }
+    }
+    
+    public DomainEvent toDomain(EventEntity entity) {
+        try {
+            // Simple deserialization based on event type
+            return switch (entity.getEventType()) {
+                case "StockReserved" -> 
+                    objectMapper.readValue(entity.getPayload(), StockReservedEvent.class);
+                case "StockCommitted" -> 
+                    objectMapper.readValue(entity.getPayload(), StockCommittedEvent.class);
+                case "StockReleased" -> 
+                    objectMapper.readValue(entity.getPayload(), StockReleasedEvent.class);
+                case "StockAdded" -> 
+                    objectMapper.readValue(entity.getPayload(), StockAddedEvent.class);
+                default -> 
+                    throw new IllegalArgumentException("Unknown event type: " + entity.getEventType());
+            };
+            
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to deserialize event", e);
+        }
+    }
+}
+
+CARACTERÍSTICAS:
+✅ MapStruct para conversão automática
+✅ @Named para conversões customizadas
+✅ Value Objects ↔ Strings
+✅ Enums ↔ Entity Enums
+✅ ObjectMapper para eventos (JSON)
+
+========================================================================================
+
+## **📋 PROMPT 14: Repository Adapters (Implementação)**
+```
+Crie os Adapters que implementam os Output Ports no pacote adapters/output/persistence/adapter/.
+
+ARQUIVOS A CRIAR:
+
+1. InventoryJpaAdapter.java
+
+package com.inventory.adapters.output.persistence.adapter;
+
+import com.inventory.adapters.output.persistence.mapper.InventoryPersistenceMapper;
+import com.inventory.adapters.output.persistence.repository.InventoryJpaRepository;
+import com.inventory.application.port.output.InventoryRepository;
+import com.inventory.domain.model.Inventory;
+import com.inventory.domain.model.Sku;
+import com.inventory.domain.model.StoreId;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+import java.util.Optional;
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class InventoryJpaAdapter implements InventoryRepository {
+    
+    private final InventoryJpaRepository jpaRepository;
+    private final InventoryPersistenceMapper mapper;
+    
+    @Override
+    public Optional<Inventory> findByStoreIdAndSku(StoreId storeId, Sku sku) {
+        log.debug("Finding inventory - store: {}, sku: {}", storeId, sku);
+        
+        return jpaRepository
+            .findByStoreIdAndSku(storeId.value(), sku.value())
+            .map(mapper::toDomain);
+    }
+    
+    @Override
+    public Optional<Inventory> findByStoreIdAndSkuWithLock(StoreId storeId, Sku sku) {
+        log.debug("Finding inventory with lock - store: {}, sku: {}", storeId, sku);
+        
+        return jpaRepository
+            .findByStoreIdAndSkuWithLock(storeId.value(), sku.value())
+            .map(mapper::toDomain);
+    }
+    
+    @Override
+    public Inventory save(Inventory inventory) {
+        log.debug("Saving inventory - sku: {}, available: {}", 
+            inventory.getSku(), inventory.availableStock());
+        
+        var entity = mapper.toEntity(inventory);
+        var saved = jpaRepository.save(entity);
+        
+        return mapper.toDomain(saved);
+    }
+    
+    @Override
+    public boolean existsByStoreIdAndSku(StoreId storeId, Sku sku) {
+        return jpaRepository.existsByStoreIdAndSku(storeId.value(), sku.value());
+    }
+}
+
+2. ReservationJpaAdapter.java
+
+package com.inventory.adapters.output.persistence.adapter;
+
+import com.inventory.adapters.output.persistence.entity.ReservationStatusEntity;
+import com.inventory.adapters.output.persistence.mapper.ReservationPersistenceMapper;
+import com.inventory.adapters.output.persistence.repository.ReservationJpaRepository;
+import com.inventory.application.port.output.ReservationRepository;
+import com.inventory.domain.model.Reservation;
+import com.inventory.domain.model.ReservationStatus;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class ReservationJpaAdapter implements ReservationRepository {
+    
+    private final ReservationJpaRepository jpaRepository;
+    private final ReservationPersistenceMapper mapper;
+    
+    @Override
+    public Optional<Reservation> findById(String reservationId) {
+        log.debug("Finding reservation: {}", reservationId);
+        
+        return jpaRepository
+            .findById(reservationId)
+            .map(mapper::toDomain);
+    }
+    
+    @Override
+    public Reservation save(Reservation reservation) {
+        log.debug("Saving reservation: {}, status: {}", 
+            reservation.getId(), reservation.getStatus());
+        
+        var entity = mapper.toEntity(reservation);
+        var saved = jpaRepository.save(entity);
+        
+        return mapper.toDomain(saved);
+    }
+    
+    @Override
+    public List<Reservation> findByStatus(ReservationStatus status) {
+        var entityStatus = ReservationStatusEntity.valueOf(status.name());
+        
+        return jpaRepository
+            .findByStatus(entityStatus)
+            .stream()
+            .map(mapper::toDomain)
+            .toList();
+    }
+    
+    @Override
+    public List<Reservation> findExpiredReservations(LocalDateTime before) {
+        return jpaRepository
+            .findExpiredReservations(before)
+            .stream()
+            .map(mapper::toDomain)
+            .toList();
+    }
+    
+    @Override
+    public void delete(Reservation reservation) {
+        log.debug("Deleting reservation: {}", reservation.getId());
+        jpaRepository.deleteById(reservation.getId());
+    }
+}
+
+3. EventStoreJpaAdapter.java
+
+package com.inventory.adapters.output.persistence.adapter;
+
+import com.inventory.adapters.output.persistence.mapper.EventPersistenceMapper;
+import com.inventory.adapters.output.persistence.repository.EventJpaRepository;
+import com.inventory.application.port.output.EventStore;
+import com.inventory.domain.event.DomainEvent;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class EventStoreJpaAdapter implements EventStore {
+    
+    private final EventJpaRepository jpaRepository;
+    private final EventPersistenceMapper mapper;
+    
+    @Override
+    public void store(DomainEvent event) {
+        log.debug("Storing event: {} ({})", event.eventId(), event.eventType());
+        
+        var entity = mapper.toEntity(event);
+        jpaRepository.save(entity);
+        
+        log.info("Event stored: {}", event.eventId());
+    }
+    
+    @Override
+    public List<DomainEvent> findByAggregateId(String aggregateId) {
+        log.debug("Finding events by aggregateId: {}", aggregateId);
+        
+        return jpaRepository
+            .findByAggregateIdOrderByTimestampAsc(aggregateId)
+            .stream()
+            .map(mapper::toDomain)
+            .toList();
+    }
+    
+    @Override
+    public List<DomainEvent> findByAggregateIdAndTimestamp(
+            String aggregateId, 
+            LocalDateTime from, 
+            LocalDateTime to) {
+        
+        log.debug("Finding events by aggregateId: {} between {} and {}", 
+            aggregateId, from, to);
+        
+        return jpaRepository
+            .findByAggregateIdAndTimestampBetween(aggregateId, from, to)
+            .stream()
+            .map(mapper::toDomain)
+            .toList();
+    }
+    
+    @Override
+    public Optional<DomainEvent> findByEventId(String eventId) {
+        return jpaRepository
+            .findById(eventId)
+            .map(mapper::toDomain);
+    }
+    
+    @Override
+    public List<DomainEvent> findAll() {
+        return jpaRepository
+            .findAll()
+            .stream()
+            .map(mapper::toDomain)
+            .toList();
+    }
+}
+
+CARACTERÍSTICAS:
+✅ Implementam Output Ports (interfaces)
+✅ Delegam para JPA Repositories
+✅ Usam Mappers para conversão
+✅ Logging estruturado
+✅ @Component para Spring gerenciar
+
+========================================================================================
+
+## **📋 PROMPT 15: Event Publisher Adapter (Opcional - Stub)**
+```
+Crie o Event Publisher Adapter no pacote adapters/output/messaging/.
+
+IMPORTANTE:
+- Este é um STUB (implementação simples)
+- Apenas loga os eventos
+- Em produção seria SNS/SQS real
+
+ARQUIVO A CRIAR:
+
+InMemoryEventPublisher.java
+
+package com.inventory.adapters.output.messaging;
+
+import com.inventory.application.port.output.EventPublisher;
+import com.inventory.domain.event.DomainEvent;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class InMemoryEventPublisher implements EventPublisher {
+    
+    private final ObjectMapper objectMapper;
+    
+    @Override
+    public void publish(DomainEvent event) {
+        try {
+            String eventJson = objectMapper.writeValueAsString(event);
+            
+            log.info("📤 EVENT PUBLISHED: {} ({})", 
+                event.eventType(), event.eventId());
+            log.debug("Event payload: {}", eventJson);
+            
+            // TODO: Integrar com SNS/SQS quando disponível
+            // snsClient.publish(...)
+            
+        } catch (Exception e) {
+            log.error("Failed to publish event: {}", event.eventId(), e);
+            // Em produção, considerar DLQ ou retry
+        }
+    }
+    
+    @Override
+    public void publishBatch(List<DomainEvent> events) {
+        log.info("📤 Publishing batch of {} events", events.size());
+        events.forEach(this::publish);
+    }
+}
+
+CARACTERÍSTICAS:
+✅ Implementação simples (stub)
+✅ Loga eventos publicados
+✅ Serializa para JSON
+✅ TODO comentado para integração futura
+✅ Fácil trocar por implementação SNS real
+
+=======================================================================================
+
+## **📋 PROMPT 15: Event Publisher Adapter (Opcional - Stub)**
+```
+Crie o Event Publisher Adapter no pacote adapters/output/messaging/.
+
+IMPORTANTE:
+- Este é um STUB (implementação simples)
+- Apenas loga os eventos
+- Em produção seria SNS/SQS real
+
+ARQUIVO A CRIAR:
+
+InMemoryEventPublisher.java
+
+package com.inventory.adapters.output.messaging;
+
+import com.inventory.application.port.output.EventPublisher;
+import com.inventory.domain.event.DomainEvent;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class InMemoryEventPublisher implements EventPublisher {
+    
+    private final ObjectMapper objectMapper;
+    
+    @Override
+    public void publish(DomainEvent event) {
+        try {
+            String eventJson = objectMapper.writeValueAsString(event);
+            
+            log.info("📤 EVENT PUBLISHED: {} ({})", 
+                event.eventType(), event.eventId());
+            log.debug("Event payload: {}", eventJson);
+            
+            // TODO: Integrar com SNS/SQS quando disponível
+            // snsClient.publish(...)
+            
+        } catch (Exception e) {
+            log.error("Failed to publish event: {}", event.eventId(), e);
+            // Em produção, considerar DLQ ou retry
+        }
+    }
+    
+    @Override
+    public void publishBatch(List<DomainEvent> events) {
+        log.info("📤 Publishing batch of {} events", events.size());
+        events.forEach(this::publish);
+    }
+}
+
+CARACTERÍSTICAS:
+✅ Implementação simples (stub)
+✅ Loga eventos publicados
+✅ Serializa para JSON
+✅ TODO comentado para integração futura
+✅ Fácil trocar por implementação SNS real
+
+NOTA: Para integrar com LocalStack/SNS:
+1. Adicionar SnsClient como dependência
+2. Publicar no tópico SNS
+3. Configurar endpoint LocalStack
+
+====================================================================================
+
+## **📋 PROMPT 16: Input Adapters - REST DTOs**
+```
+Crie os DTOs REST no pacote adapters/input/rest/dto/.
+
+ARQUIVOS A CRIAR:
+
+1. ReserveStockRequest.java
+
+package com.inventory.adapters.input.rest.dto;
+
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+
+public record ReserveStockRequest(
+    
+    @NotBlank(message = "storeId is required")
+    String storeId,
+    
+    @NotBlank(message = "sku is required")
+    @Pattern(regexp = "^SKU\\d{3,6}$", message = "SKU must be in format SKUxxx")
+    String sku,
+    
+    @Min(value = 1, message = "quantity must be at least 1")
+    int quantity,
+    
+    @NotBlank(message = "customerId is required")
+    String customerId
+) {
+}
+
+2. CommitStockRequest.java
+
+package com.inventory.adapters.input.rest.dto;
+
+import jakarta.validation.constraints.NotBlank;
+
+public record CommitStockRequest(
+    
+    @NotBlank(message = "reservationId is required")
+    String reservationId,
+    
+    @NotBlank(message = "orderId is required")
+    String orderId
+) {
+}
+
+3. ReleaseStockRequest.java
+
+package com.inventory.adapters.input.rest.dto;
+
+import jakarta.validation.constraints.NotBlank;
+
+public record ReleaseStockRequest(
+    
+    @NotBlank(message = "reservationId is required")
+    String reservationId,
+    
+    @NotBlank(message = "reason is required")
+    String reason
+) {
+}
+
+4. ReservationResponse.java
+
+package com.inventory.adapters.input.rest.dto;
+
+import java.time.LocalDateTime;
+
+public record ReservationResponse(
+    String reservationId,
+    String storeId,
+    String sku,
+    int quantity,
+    String status,
+    LocalDateTime expiresAt,
+    String message
+) {
+}
+
+5. InventoryResponse.java
+
+package com.inventory.adapters.input.rest.dto;
+
+public record InventoryResponse(
+    String storeId,
+    String sku,
+    String productName,
+    int availableStock,
+    int reservedStock,
+    int soldStock,
+    int totalStock
+) {
+}
+
+6. ErrorResponse.java
+
+package com.inventory.adapters.input.rest.dto;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+
+public record ErrorResponse(
+    LocalDateTime timestamp,
+    int status,
+    String error,
+    String message,
+    String path,
+    Map<String, Object> details,
+    List<FieldErrorDetail> fieldErrors
+) {
+    
+    public record FieldErrorDetail(
+        String field,
+        String message,
+        Object rejectedValue
+    ) {
+    }
+    
+    public static ErrorResponse of(
+            int status,
+            String error,
+            String message,
+            String path) {
+        return new ErrorResponse(
+            LocalDateTime.now(),
+            status,
+            error,
+            message,
+            path,
+            Map.of(),
+            List.of()
+        );
+    }
+    
+    public static ErrorResponse of(
+            int status,
+            String error,
+            String message,
+            String path,
+            Map<String, Object> details) {
+        return new ErrorResponse(
+            LocalDateTime.now(),
+            status,
+            error,
+            message,
+            path,
+            details,
+            List.of()
+        );
+    }
+}
+
+CARACTERÍSTICAS:
+✅ Java Records (imutáveis)
+✅ Bean Validation (@NotBlank, @Min, @Pattern)
+✅ Mensagens de erro customizadas
+✅ Factory methods (ErrorResponse.of)
+✅ Nested records (FieldErrorDetail)
