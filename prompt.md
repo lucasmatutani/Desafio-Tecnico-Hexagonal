@@ -930,7 +930,9 @@ CARACTERÍSTICAS:
 
 ===================================================================================================================
 
-📋 PROMPT 5: Domain ExceptionsCrie a hierarquia de Domain Exceptions no pacote domain/exception/.
+📋 PROMPT 5: Domain Exceptions 
+
+Crie a hierarquia de Domain Exceptions no pacote domain/exception/.
 
 IMPORTANTE:
 - Exceções devem conter informações ricas para debugging
@@ -1130,3 +1132,556 @@ CARACTERÍSTICAS:
 ✅ Detalhes estruturados (Map)
 ✅ Mensagens descritivas
 ✅ Campos específicos com @Getter
+
+===================================================================================================================
+
+## **📋 PROMPT 6: Domain Policies (Business Rules)**
+```
+Crie as Business Rules como Policies no pacote domain/policy/.
+
+IMPORTANTE:
+- Policies são stateless
+- Contêm apenas regras de negócio puras
+- Retornam ValidationResult
+- Facilmente testáveis
+
+ARQUIVOS A CRIAR:
+
+1. ValidationResult.java (Value Object)
+
+package com.inventory.domain.policy;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+public record ValidationResult(
+    boolean valid,
+    List<String> errors
+) {
+    
+    public static ValidationResult success() {
+        return new ValidationResult(true, List.of());
+    }
+    
+    public static ValidationResult failure(String... errors) {
+        return new ValidationResult(false, Arrays.asList(errors));
+    }
+    
+    public static ValidationResult failure(List<String> errors) {
+        return new ValidationResult(false, new ArrayList<>(errors));
+    }
+    
+    public boolean isValid() {
+        return valid;
+    }
+    
+    public boolean hasErrors() {
+        return !valid;
+    }
+}
+
+2. ReservationPolicy.java
+
+package com.inventory.domain.policy;
+
+import com.inventory.domain.model.Inventory;
+import org.springframework.stereotype.Component;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+
+@Component
+public class ReservationPolicy {
+    
+    private static final int DEFAULT_TTL_MINUTES = 15;
+    private static final int MIN_QUANTITY = 1;
+    private static final int MAX_QUANTITY_PER_RESERVATION = 100;
+    
+    public ValidationResult validate(Inventory inventory, int quantity) {
+        List<String> errors = new ArrayList<>();
+        
+        // Valida quantidade mínima
+        if (quantity < MIN_QUANTITY) {
+            errors.add(String.format(
+                "Quantity must be at least %d", MIN_QUANTITY
+            ));
+        }
+        
+        // Valida quantidade máxima
+        if (quantity > MAX_QUANTITY_PER_RESERVATION) {
+            errors.add(String.format(
+                "Quantity cannot exceed %d per reservation", 
+                MAX_QUANTITY_PER_RESERVATION
+            ));
+        }
+        
+        // Valida estoque disponível
+        if (!inventory.hasAvailableStock(quantity)) {
+            errors.add(String.format(
+                "Insufficient stock. Requested: %d, Available: %d",
+                quantity, inventory.availableStock()
+            ));
+        }
+        
+        return errors.isEmpty() 
+            ? ValidationResult.success() 
+            : ValidationResult.failure(errors);
+    }
+    
+    public Duration getTtl() {
+        return Duration.ofMinutes(DEFAULT_TTL_MINUTES);
+    }
+    
+    public boolean canReserve(Inventory inventory, int quantity) {
+        return validate(inventory, quantity).isValid();
+    }
+    
+    public int getMaxQuantityPerReservation() {
+        return MAX_QUANTITY_PER_RESERVATION;
+    }
+}
+
+3. StockValidationPolicy.java
+
+package com.inventory.domain.policy;
+
+import com.inventory.domain.model.Stock;
+import org.springframework.stereotype.Component;
+import java.util.ArrayList;
+import java.util.List;
+
+@Component
+public class StockValidationPolicy {
+    
+    private static final int LOW_STOCK_THRESHOLD = 10;
+    private static final int CRITICAL_STOCK_THRESHOLD = 5;
+    private static final int MAX_STOCK_PER_ITEM = 10000;
+    
+    public ValidationResult validateStockOperation(
+            Stock currentStock, 
+            int quantity, 
+            StockOperation operation) {
+        
+        List<String> errors = new ArrayList<>();
+        
+        switch (operation) {
+            case ADD -> validateAdd(currentStock, quantity, errors);
+            case RESERVE -> validateReserve(currentStock, quantity, errors);
+            case COMMIT -> validateCommit(currentStock, quantity, errors);
+            case RELEASE -> validateRelease(currentStock, quantity, errors);
+        }
+        
+        return errors.isEmpty() 
+            ? ValidationResult.success() 
+            : ValidationResult.failure(errors);
+    }
+    
+    private void validateAdd(Stock stock, int quantity, List<String> errors) {
+        if (quantity <= 0) {
+            errors.add("Quantity to add must be positive");
+        }
+        
+        int newTotal = stock.totalStock() + quantity;
+        if (newTotal > MAX_STOCK_PER_ITEM) {
+            errors.add(String.format(
+                "Cannot add %d units. Would exceed maximum stock of %d",
+                quantity, MAX_STOCK_PER_ITEM
+            ));
+        }
+    }
+    
+    private void validateReserve(Stock stock, int quantity, List<String> errors) {
+        if (quantity <= 0) {
+            errors.add("Quantity to reserve must be positive");
+        }
+        
+        if (quantity > stock.availableStock()) {
+            errors.add(String.format(
+                "Cannot reserve %d units. Only %d available",
+                quantity, stock.availableStock()
+            ));
+        }
+    }
+    
+    private void validateCommit(Stock stock, int quantity, List<String> errors) {
+        if (quantity > stock.reservedStock()) {
+            errors.add(String.format(
+                "Cannot commit %d units. Only %d reserved",
+                quantity, stock.reservedStock()
+            ));
+        }
+    }
+    
+    private void validateRelease(Stock stock, int quantity, List<String> errors) {
+        if (quantity > stock.reservedStock()) {
+            errors.add(String.format(
+                "Cannot release %d units. Only %d reserved",
+                quantity, stock.reservedStock()
+            ));
+        }
+    }
+    
+    public boolean isLowStock(Stock stock) {
+        return stock.availableStock() < LOW_STOCK_THRESHOLD;
+    }
+    
+    public boolean isCriticalStock(Stock stock) {
+        return stock.availableStock() < CRITICAL_STOCK_THRESHOLD;
+    }
+    
+    public StockLevel checkStockLevel(Stock stock) {
+        if (stock.availableStock() == 0) {
+            return StockLevel.OUT_OF_STOCK;
+        } else if (isCriticalStock(stock)) {
+            return StockLevel.CRITICAL;
+        } else if (isLowStock(stock)) {
+            return StockLevel.LOW;
+        } else {
+            return StockLevel.NORMAL;
+        }
+    }
+}
+
+4. StockOperation.java (Enum)
+
+package com.inventory.domain.policy;
+
+public enum StockOperation {
+    ADD,
+    RESERVE,
+    COMMIT,
+    RELEASE
+}
+
+5. StockLevel.java (Enum)
+
+package com.inventory.domain.policy;
+
+public enum StockLevel {
+    OUT_OF_STOCK,
+    CRITICAL,
+    LOW,
+    NORMAL
+}
+
+6. ExpirationPolicy.java
+
+package com.inventory.domain.policy;
+
+import com.inventory.domain.model.Reservation;
+import org.springframework.stereotype.Component;
+import java.time.Duration;
+import java.time.LocalDateTime;
+
+@Component
+public class ExpirationPolicy {
+    
+    private static final int EXPIRING_SOON_MINUTES = 5;
+    
+    public boolean isExpired(Reservation reservation) {
+        return LocalDateTime.now().isAfter(reservation.getExpiresAt());
+    }
+    
+    public Duration timeUntilExpiration(Reservation reservation) {
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime expiresAt = reservation.getExpiresAt();
+        
+        if (now.isAfter(expiresAt)) {
+            return Duration.ZERO;
+        }
+        
+        return Duration.between(now, expiresAt);
+    }
+    
+    public boolean isExpiringSoon(Reservation reservation) {
+        Duration remaining = timeUntilExpiration(reservation);
+        long remainingMinutes = remaining.toMinutes();
+        
+        return remainingMinutes > 0 && remainingMinutes < EXPIRING_SOON_MINUTES;
+    }
+    
+    public int getMinutesUntilExpiration(Reservation reservation) {
+        return (int) timeUntilExpiration(reservation).toMinutes();
+    }
+}
+
+CARACTERÍSTICAS:
+✅ Policies são stateless (@Component)
+✅ Apenas regras de negócio
+✅ Retornam ValidationResult
+✅ Constantes configuráveis
+✅ Métodos auxiliares (isLowStock, etc)
+
+==================================================================================================================
+
+## **📋 PROMPT 7: Application Ports (Interfaces)**
+```
+Crie as Ports (interfaces) no pacote application/port/.
+
+IMPORTANTE:
+- Ports são INTERFACES (contratos)
+- Input Ports = Use Cases
+- Output Ports = Dependências externas
+
+ARQUIVOS A CRIAR:
+
+==== INPUT PORTS (application/port/input/) ====
+
+1. ReserveStockCommand.java
+
+package com.inventory.application.port.input;
+
+import com.inventory.domain.model.Sku;
+import com.inventory.domain.model.StoreId;
+import java.util.Objects;
+
+public record ReserveStockCommand(
+    StoreId storeId,
+    Sku sku,
+    int quantity,
+    String customerId
+) {
+    public ReserveStockCommand {
+        Objects.requireNonNull(storeId, "storeId cannot be null");
+        Objects.requireNonNull(sku, "sku cannot be null");
+        Objects.requireNonNull(customerId, "customerId cannot be null");
+        if (quantity <= 0) {
+            throw new IllegalArgumentException("quantity must be positive");
+        }
+    }
+}
+
+2. CommitStockCommand.java
+
+package com.inventory.application.port.input;
+
+import java.util.Objects;
+
+public record CommitStockCommand(
+    String reservationId,
+    String orderId
+) {
+    public CommitStockCommand {
+        Objects.requireNonNull(reservationId, "reservationId cannot be null");
+        Objects.requireNonNull(orderId, "orderId cannot be null");
+    }
+}
+
+3. ReleaseStockCommand.java
+
+package com.inventory.application.port.input;
+
+import java.util.Objects;
+
+public record ReleaseStockCommand(
+    String reservationId,
+    String reason
+) {
+    public ReleaseStockCommand {
+        Objects.requireNonNull(reservationId, "reservationId cannot be null");
+        Objects.requireNonNull(reason, "reason cannot be null");
+    }
+}
+
+4. Result.java (Generic Result type)
+
+package com.inventory.application.port.input;
+
+public sealed interface Result<S, F> 
+    permits Result.Success, Result.Failure {
+    
+    record Success<S, F>(S value) implements Result<S, F> {
+        public boolean isSuccess() { return true; }
+        public boolean isFailure() { return false; }
+        
+        public S getValue() { return value; }
+        public F getError() { throw new UnsupportedOperationException("Success has no error"); }
+    }
+    
+    record Failure<S, F>(F error) implements Result<S, F> {
+        public boolean isSuccess() { return false; }
+        public boolean isFailure() { return true; }
+        
+        public S getValue() { throw new UnsupportedOperationException("Failure has no value"); }
+        public F getError() { return error; }
+    }
+    
+    static <S, F> Result<S, F> success(S value) {
+        return new Success<>(value);
+    }
+    
+    static <S, F> Result<S, F> failure(F error) {
+        return new Failure<>(error);
+    }
+    
+    boolean isSuccess();
+    boolean isFailure();
+    S getValue();
+    F getError();
+}
+
+5. DomainError.java
+
+package com.inventory.application.port.input;
+
+import com.inventory.domain.exception.DomainException;
+import java.util.Map;
+
+public record DomainError(
+    String code,
+    String message,
+    Map<String, Object> details
+) {
+    public static DomainError from(DomainException ex) {
+        return new DomainError(
+            ex.getCode(),
+            ex.getMessage(),
+            ex.getDetails()
+        );
+    }
+    
+    public static DomainError of(String code, String message) {
+        return new DomainError(code, message, Map.of());
+    }
+}
+
+6. ReserveStockUseCase.java
+
+package com.inventory.application.port.input;
+
+import com.inventory.domain.model.ReservationId;
+
+public interface ReserveStockUseCase {
+    Result<ReservationId, DomainError> reserve(ReserveStockCommand command);
+}
+
+7. CommitStockUseCase.java
+
+package com.inventory.application.port.input;
+
+public interface CommitStockUseCase {
+    Result<String, DomainError> commit(CommitStockCommand command);
+}
+
+8. ReleaseStockUseCase.java
+
+package com.inventory.application.port.input;
+
+public interface ReleaseStockUseCase {
+    Result<Void, DomainError> release(ReleaseStockCommand command);
+}
+
+9. QueryStockUseCase.java
+
+package com.inventory.application.port.input;
+
+import com.inventory.domain.model.Sku;
+import com.inventory.domain.model.StoreId;
+import java.util.Optional;
+
+public interface QueryStockUseCase {
+    Optional<InventoryView> findByStoreAndSku(StoreId storeId, Sku sku);
+}
+
+10. InventoryView.java (DTO para queries)
+
+package com.inventory.application.port.input;
+
+import com.inventory.domain.model.Inventory;
+
+public record InventoryView(
+    String storeId,
+    String sku,
+    String productName,
+    int availableStock,
+    int reservedStock,
+    int soldStock
+) {
+    public static InventoryView from(Inventory inventory) {
+        return new InventoryView(
+            inventory.getStoreId().value(),
+            inventory.getSku().value(),
+            inventory.getProductName(),
+            inventory.availableStock(),
+            inventory.reservedStock(),
+            inventory.soldStock()
+        );
+    }
+}
+
+==== OUTPUT PORTS (application/port/output/) ====
+
+11. InventoryRepository.java
+
+package com.inventory.application.port.output;
+
+import com.inventory.domain.model.Inventory;
+import com.inventory.domain.model.Sku;
+import com.inventory.domain.model.StoreId;
+import java.util.Optional;
+
+public interface InventoryRepository {
+    Optional<Inventory> findByStoreIdAndSku(StoreId storeId, Sku sku);
+    Optional<Inventory> findByStoreIdAndSkuWithLock(StoreId storeId, Sku sku);
+    Inventory save(Inventory inventory);
+    boolean existsByStoreIdAndSku(StoreId storeId, Sku sku);
+}
+
+12. ReservationRepository.java
+
+package com.inventory.application.port.output;
+
+import com.inventory.domain.model.Reservation;
+import com.inventory.domain.model.ReservationStatus;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+
+public interface ReservationRepository {
+    Optional<Reservation> findById(String reservationId);
+    Reservation save(Reservation reservation);
+    List<Reservation> findByStatus(ReservationStatus status);
+    List<Reservation> findExpiredReservations(LocalDateTime before);
+    void delete(Reservation reservation);
+}
+
+13. EventStore.java
+
+package com.inventory.application.port.output;
+
+import com.inventory.domain.event.DomainEvent;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+
+public interface EventStore {
+    void store(DomainEvent event);
+    List<DomainEvent> findByAggregateId(String aggregateId);
+    List<DomainEvent> findByAggregateIdAndTimestamp(
+        String aggregateId, 
+        LocalDateTime from, 
+        LocalDateTime to
+    );
+    Optional<DomainEvent> findByEventId(String eventId);
+    List<DomainEvent> findAll();
+}
+
+14. EventPublisher.java
+
+package com.inventory.application.port.output;
+
+import com.inventory.domain.event.DomainEvent;
+import java.util.List;
+
+public interface EventPublisher {
+    void publish(DomainEvent event);
+    void publishBatch(List<DomainEvent> events);
+}
+
+CARACTERÍSTICAS:
+✅ Ports são interfaces (contratos)
+✅ Input Ports = Use Cases do sistema
+✅ Output Ports = Abstrações de infraestrutura
+✅ Commands são imutáveis (records)
+✅ Result type para Railway Oriented Programming
