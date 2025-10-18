@@ -36,10 +36,25 @@ public class ReservationJpaAdapter implements ReservationRepository {
         log.debug("Saving reservation: {}, status: {}", 
             reservation.getId(), reservation.getStatus());
         
-        var entity = mapper.toEntity(reservation);
-        var saved = jpaRepository.save(entity);
+        // Verifica se a reserva já existe
+        var existingEntity = jpaRepository.findById(reservation.getId());
         
-        return mapper.toDomain(saved);
+        if (existingEntity.isPresent()) {
+            // Atualiza a entidade existente para preservar o estado JPA
+            var entity = existingEntity.get();
+            entity.setQuantity(reservation.getQuantity());
+            entity.setStatus(mapper.statusToEntity(reservation.getStatus()));
+            entity.setCommittedAt(reservation.getCommittedAt());
+            // Mantém: id, storeId, sku, customerId, createdAt, expiresAt (imutáveis após criação)
+            
+            var saved = jpaRepository.save(entity);
+            return mapper.toDomain(saved);
+        } else {
+            // Nova reserva, converte normalmente
+            var entity = mapper.toEntity(reservation);
+            var saved = jpaRepository.save(entity);
+            return mapper.toDomain(saved);
+        }
     }
     
     @Override

@@ -43,10 +43,25 @@ public class InventoryJpaAdapter implements InventoryRepository {
         log.debug("Saving inventory - sku: {}, available: {}", 
             inventory.getSku(), inventory.availableStock());
         
-        var entity = mapper.toEntity(inventory);
-        var saved = jpaRepository.save(entity);
-        
-        return mapper.toDomain(saved);
+        // Se a entidade já existe (tem ID), busca e atualiza para preservar version
+        if (inventory.getId() != null) {
+            var existingEntity = jpaRepository.findById(inventory.getId())
+                .orElseThrow(() -> new RuntimeException("Inventory not found with id: " + inventory.getId()));
+            
+            // Atualiza apenas os campos modificáveis, preservando id e version
+            existingEntity.setAvailableStock(inventory.availableStock());
+            existingEntity.setReservedStock(inventory.reservedStock());
+            existingEntity.setSoldStock(inventory.soldStock());
+            existingEntity.setLastUpdated(inventory.getLastUpdated());
+            
+            var saved = jpaRepository.save(existingEntity);
+            return mapper.toDomain(saved);
+        } else {
+            // Nova entidade, converte normalmente
+            var entity = mapper.toEntity(inventory);
+            var saved = jpaRepository.save(entity);
+            return mapper.toDomain(saved);
+        }
     }
     
     @Override
