@@ -5,6 +5,10 @@ import com.inventory.adapters.input.rest.mapper.InventoryRestMapper;
 import com.inventory.application.port.input.*;
 import com.inventory.domain.model.ReservationId;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -28,7 +32,44 @@ public class InventoryCommandController {
     private final InventoryRestMapper mapper;
     
     @PostMapping("/reserve")
-    @Operation(summary = "Reserve stock", description = "Reserve stock for a customer with TTL")
+    @Operation(
+        summary = "Reserve stock", 
+        description = "Reserve stock for a customer with 15 minutes TTL. Returns reservation ID that expires automatically."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(
+            responseCode = "201",
+            description = "Stock reserved successfully",
+            content = @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = ReservationResponse.class)
+            )
+        ),
+        @ApiResponse(
+            responseCode = "400",
+            description = "Invalid request or insufficient stock",
+            content = @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = ErrorResponse.class)
+            )
+        ),
+        @ApiResponse(
+            responseCode = "404",
+            description = "Product not found in store",
+            content = @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = ErrorResponse.class)
+            )
+        ),
+        @ApiResponse(
+            responseCode = "500",
+            description = "Internal server error",
+            content = @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = ErrorResponse.class)
+            )
+        )
+    })
     public ResponseEntity<?> reserveStock(@Valid @RequestBody ReserveStockRequest request) {
         
         log.info("📥 Reserve stock request - store: {}, sku: {}, qty: {}", 
@@ -64,7 +105,44 @@ public class InventoryCommandController {
     }
     
     @PostMapping("/commit")
-    @Operation(summary = "Commit reservation", description = "Confirm sale and commit reserved stock")
+    @Operation(
+        summary = "Commit reservation", 
+        description = "Confirm sale and commit reserved stock. Moves stock from reserved to sold."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(
+            responseCode = "200",
+            description = "Reservation committed successfully",
+            content = @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = ReservationResponse.class)
+            )
+        ),
+        @ApiResponse(
+            responseCode = "400",
+            description = "Invalid reservation state or expired reservation",
+            content = @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = ErrorResponse.class)
+            )
+        ),
+        @ApiResponse(
+            responseCode = "404",
+            description = "Reservation not found",
+            content = @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = ErrorResponse.class)
+            )
+        ),
+        @ApiResponse(
+            responseCode = "500",
+            description = "Internal server error",
+            content = @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = ErrorResponse.class)
+            )
+        )
+    })
     public ResponseEntity<?> commitStock(@Valid @RequestBody CommitStockRequest request) {
         
         log.info("📥 Commit stock request - reservationId: {}", request.reservationId());
@@ -93,7 +171,44 @@ public class InventoryCommandController {
     }
     
     @PostMapping("/release")
-    @Operation(summary = "Release reservation", description = "Cancel reservation and return stock")
+    @Operation(
+        summary = "Release reservation", 
+        description = "Cancel reservation and return stock to available. Can be used when customer cancels order."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(
+            responseCode = "200",
+            description = "Reservation released successfully",
+            content = @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = ReservationResponse.class)
+            )
+        ),
+        @ApiResponse(
+            responseCode = "400",
+            description = "Invalid reservation state (already committed)",
+            content = @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = ErrorResponse.class)
+            )
+        ),
+        @ApiResponse(
+            responseCode = "404",
+            description = "Reservation not found",
+            content = @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = ErrorResponse.class)
+            )
+        ),
+        @ApiResponse(
+            responseCode = "500",
+            description = "Internal server error",
+            content = @Content(
+                mediaType = "application/json",
+                schema = @Schema(implementation = ErrorResponse.class)
+            )
+        )
+    })
     public ResponseEntity<?> releaseStock(@Valid @RequestBody ReleaseStockRequest request) {
         
         log.info("📥 Release stock request - reservationId: {}", request.reservationId());
