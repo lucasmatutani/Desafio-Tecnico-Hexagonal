@@ -16,7 +16,7 @@
 - [Visão Geral](#-visão-geral)
 - [Arquitetura](#-arquitetura)
 - [Tecnologias](#-tecnologias)
-- [Como Executar](#-como-executar)
+- [Como Executar](#-como-executar) → **[Guia Detalhado](run.md)**
 - [Endpoints da API](#-endpoints-da-api)
 - [Decisões Técnicas](#-decisões-técnicas)
 - [Testes](#-testes)
@@ -260,76 +260,25 @@ public Result<ReservationView, DomainError> execute(ReserveStockCommand cmd) {
 
 ## 🚀 Como Executar
 
-### Pré-requisitos
+**📖 [Guia Completo de Execução →](run.md)**
 
-- ☕ **Java 21+** ([Download](https://adoptium.net/))
-- 📦 **Maven 3.9+** ([Download](https://maven.apache.org/download.cgi))
-
-### 1️⃣ Clone o Repositório
+### Quick Start
 
 ```bash
+# 1. Clone e entre no diretório
 git clone https://github.com/seu-usuario/inventory-service.git
 cd inventory-service
-```
 
-### 2️⃣ Compile o Projeto
-
-```bash
+# 2. Compile e execute
 mvn clean install
-```
-
-### 3️⃣ Execute a Aplicação
-
-```bash
 mvn spring-boot:run
+
+# 3. Acesse
+# API: http://localhost:8081
+# Swagger: http://localhost:8081/swagger-ui.html
 ```
 
-A aplicação estará disponível em:
-- **API:** http://localhost:8081
-- **Swagger UI:** http://localhost:8081/swagger-ui.html
-- **H2 Console:** http://localhost:8081/h2-console
-
-### 4️⃣ Acessar H2 Console (Dev Mode)
-
-```
-URL: http://localhost:8081/h2-console
-
-JDBC URL: jdbc:h2:mem:inventory
-User: sa
-Password: (deixe vazio)
-```
-
-### 5️⃣ Executar Testes
-
-```bash
-# Todos os testes
-mvn test
-
-# Apenas unit tests
-mvn test -Dtest="*Test"
-
-# Apenas integration tests
-mvn test -Dtest="*IntegrationTest"
-
-# Apenas architecture tests
-mvn test -Dtest="HexagonalArchitectureTest"
-
-# Com relatório de cobertura
-mvn clean test jacoco:report
-# Relatório: target/site/jacoco/index.html
-```
-
-### 6️⃣ Build para Produção
-
-```bash
-mvn clean package -DskipTests
-
-# JAR gerado em:
-# target/inventory-service-1.0.0.jar
-
-# Executar JAR
-java -jar target/inventory-service-1.0.0.jar
-```
+**Para instruções detalhadas, troubleshooting e mais opções, consulte [run.md](run.md)**
 
 ---
 
@@ -553,6 +502,90 @@ Inventory findByStoreIdAndSku(String storeId, String sku);
 // Denormalizado, otimizado para queries rápidas
 SELECT * FROM inventory_view WHERE storeId = ? AND sku = ?
 ```
+
+#### 💡 CQRS Interno (Light) - Abordagem Pragmática
+
+**Implementação Atual:**
+
+Este projeto implementa **CQRS interno (light)** onde Commands e Queries estão separados **logicamente** no mesmo serviço, compartilhando o database:
+
+| Aspecto | Implementação |
+|---------|---------------|
+| **Commands** | `ReserveStockService`, `CommitStockService`, `ReleaseStockService` |
+| **Queries** | `QueryStockService` |
+| **Database** | Compartilhado (H2/PostgreSQL) |
+| **Consistência** | Forte (ACID) |
+| **Controllers** | Separados: `InventoryCommandController` vs `InventoryQueryController` |
+
+**Por que essa abordagem?**
+
+| Benefício | Explicação |
+|-----------|------------|
+| **Simplicidade Operacional** | Um único serviço, um único banco, deploy simples |
+| **Consistência Forte** | Transações ACID garantidas (crítico para inventário) |
+| **Ideal para MVP** | Mantém complexidade baixa no início |
+| **Evolutivo** | Código já estruturado para CQRS completo |
+
+**Evolução Futura (Quando escalar):**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                CQRS INTERNO (Atual)                     │
+├─────────────────────────────────────────────────────────┤
+│  ┌──────────────┐        ┌──────────────┐              │
+│  │   Commands   │        │   Queries    │              │
+│  │  (Services)  │        │  (Services)  │              │
+│  └──────┬───────┘        └──────┬───────┘              │
+│         │                       │                       │
+│         └───────────┬───────────┘                       │
+│                     ▼                                   │
+│              ┌─────────────┐                            │
+│              │  Database   │  ← Compartilhado          │
+│              └─────────────┘                            │
+└─────────────────────────────────────────────────────────┘
+
+                        ↓ Quando escalar
+
+┌─────────────────────────────────────────────────────────┐
+│              CQRS COMPLETO (Futuro)                     │
+├─────────────────────────────────────────────────────────┤
+│  ┌──────────────┐                                       │
+│  │   Commands   │                                       │
+│  │  (Write DB)  │────┐ Events                           │
+│  └──────────────┘    │                                  │
+│                      ▼                                   │
+│              ┌──────────────┐                           │
+│              │ Event Stream │                           │
+│              │  (SNS/Kafka) │                           │
+│              └──────┬───────┘                           │
+│                     │ Projection                        │
+│                     ▼                                   │
+│              ┌─────────────┐                            │
+│              │   Queries   │                            │
+│              │  (Read DB)  │  ← Denormalizado          │
+│              └─────────────┘                            │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Trade-offs conscientes:**
+
+| Aspecto | CQRS Interno (Atual) | CQRS Completo (Futuro) |
+|---------|---------------------|------------------------|
+| **Consistência** | ✅ Forte (ACID) | ⚠️ Eventual |
+| **Complexidade** | ✅ Baixa | ❌ Alta |
+| **Operacional** | ✅ Simples (1 serviço) | ❌ Complexo (2+ serviços) |
+| **Escalabilidade** | ⚠️ Vertical | ✅ Horizontal |
+| **Custo** | ✅ Baixo | ❌ Alto |
+| **Time to Market** | ✅ Rápido | ❌ Lento |
+
+**Quando migrar para CQRS completo?**
+
+- 📈 **Read >> Write** (ex: 1000 queries/s vs 10 commands/s)
+- 🚀 **Query performance crítico** (latência < 10ms)
+- 🌍 **Escala global** (read replicas por região)
+- 📊 **Múltiplas projeções** (dashboards, analytics, reports)
+
+**Conclusão:** CQRS interno é a escolha certa para este estágio do projeto, mantendo a porta aberta para evolução futura sem reescrever todo o código.
 
 ### ❓ Por que Pessimistic Locking?
 
