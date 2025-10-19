@@ -69,50 +69,6 @@ curl http://localhost:8081/actuator/health
 }
 ```
 
-### 2. Consultar Estoque
-
-```bash
-curl http://localhost:8081/api/v1/inventory/STORE-01/SKU123
-```
-
-**Response esperado:**
-```json
-{
-  "storeId": "STORE-01",
-  "sku": "SKU123",
-  "productName": "Notebook Dell XPS 13",
-  "availableStock": 100,
-  "reservedStock": 0,
-  "soldStock": 0,
-  "totalStock": 100
-}
-```
-
-### 3. Reservar Estoque
-
-```bash
-curl -X POST http://localhost:8081/api/v1/inventory/reserve \
-  -H "Content-Type: application/json" \
-  -d '{
-    "storeId": "STORE-01",
-    "sku": "SKU123",
-    "quantity": 10,
-    "customerId": "CUST-001"
-  }'
-```
-
-**Response esperado:**
-```json
-{
-  "reservationId": "RES-...",
-  "storeId": "STORE-01",
-  "sku": "SKU123",
-  "quantity": 10,
-  "status": "RESERVED",
-  "expiresAt": "2025-10-19T14:15:00Z"
-}
-```
-
 ---
 
 ## 🗄️ Acessar H2 Console

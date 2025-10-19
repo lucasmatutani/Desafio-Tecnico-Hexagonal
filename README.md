@@ -34,6 +34,38 @@
 
 Sistema de gerenciamento de inventário para redes de varejo que implementa padrões avançados de arquitetura de software, garantindo **consistência forte**, **auditoria completa** e **escalabilidade**.
 
+## Por que apenas o Inventory Service foi implementado?
+
+Este projeto tem caráter **demonstrativo e educacional**, com foco em evidenciar 
+**profundidade técnica** ao invés de extensão. A implementação completa do 
+Inventory Service (write model) demonstra:
+
+✅ **Arquitetura Hexagonal completa** (Domain, Application, Adapters)  
+✅ **DDD tático** (Aggregates, Entities, Value Objects, Domain Events)  
+✅ **Event Sourcing** com Event Store funcional  
+✅ **CQRS interno** (Commands/Queries separados)  
+✅ **Testes robustos** (78 testes, 85% coverage, ArchUnit)  
+✅ **Qualidade de código** (Clean Code, SOLID, Design Patterns)
+
+### Serviços Documentados (Design)
+
+Os demais serviços (Query, Event Store, Notification, Analytics, Backup) estão 
+**documentados** com:
+
+- Arquitetura detalhada
+- APIs (endpoints, contratos)
+- Fluxos de integração
+
+Esta abordagem demonstra **capacidade de design de sistemas** enquanto mantém 
+foco na **qualidade de implementação** do componente mais crítico: o write model 
+com transações ACID e lógica de negócio complexa.
+
+Esta seria a implementação completa da solução: 
+
+![Architecture Diagram](diagrams/systemDiagram.png)
+
+Esse diagrama também pode ser encontrado em XML na pasta "diagrams" na raiz do projeto.
+
 ### Funcionalidades Principais
 
 - ✅ **Reserva de Estoque** com TTL (15 minutos)
