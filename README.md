@@ -8,6 +8,11 @@
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/Tests-78%20passing-success.svg)]()
 [![Coverage](https://img.shields.io/badge/Coverage-85%25-brightgreen.svg)]()
+[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
+
+---
+
+> **🚀 Execute em 3 minutos:** `docker-compose up` → [localhost:8081/swagger-ui.html](http://localhost:8081/swagger-ui.html)
 
 ---
 
@@ -260,7 +265,23 @@ public Result<ReservationView, DomainError> execute(ReserveStockCommand cmd) {
 
 ## 🚀 Como Executar
 
-**Para instruções detalhadas, troubleshooting e mais opções, consulte [run.md](run.md)**
+### Quick Start com Docker 🐳
+
+```bash
+# Clone o projeto
+git clone https://github.com/seu-usuario/inventory-service.git
+cd inventory-service
+
+# Execute com Docker (sem instalar Java/Maven!)
+docker-compose up
+
+# Acesse o Swagger
+# http://localhost:8081/swagger-ui.html
+```
+
+**Pronto!** A aplicação estará rodando em ~3 minutos.
+
+**📖 [Guia Completo →](run.md)** (comandos úteis, troubleshooting, variáveis de ambiente, H2 Console, etc.)
 
 ---
 
@@ -878,7 +899,6 @@ A aplicação inicializa automaticamente com dados de exemplo via `DataInitializ
 - [ ] **Alerting** (PagerDuty/Slack)
 
 #### DevOps
-- [ ] **Docker** (containerização)
 - [ ] **Kubernetes** (orquestração)
 - [ ] **Helm Charts** (deployment)
 - [ ] **CI/CD Pipelines** (GitHub Actions / GitLab CI)
@@ -900,7 +920,7 @@ A aplicação inicializa automaticamente com dados de exemplo via `DataInitializ
 
 ## 👤 Autor
 
-**Desenvolvedor Backend Sênior**
+**Lucas Matutani**
 
 Este projeto demonstra conhecimento profundo em:
 
@@ -934,38 +954,6 @@ Este projeto demonstra conhecimento profundo em:
 - ✅ Extensive Documentation (Swagger)
 - ✅ Logging estruturado
 
----
-
-## 📄 Licença
-
-Este projeto é licenciado sob a **MIT License**.
-
-```
-MIT License
-
-Copyright (c) 2025
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
----
-
 ## 🙏 Agradecimentos
 
 Este projeto foi desenvolvido como **demonstração de conhecimento avançado em arquitetura de software**, aplicando as melhores práticas da indústria.
@@ -982,9 +970,9 @@ Inspirações:
 
 Para discussões sobre arquitetura, oportunidades ou feedbacks:
 
-- 📧 Email: [seu.email@example.com]
-- 💼 LinkedIn: [seu-perfil]
-- 🐙 GitHub: [seu-perfil]
+- 📧 Email: [lucasmatutani@gmail.com]
+- 💼 LinkedIn: [https://www.linkedin.com/in/lucas-matutani-9a6576208/]
+- 🐙 GitHub: [https://github.com/lucasmatutani]
 
 ---
 

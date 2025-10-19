@@ -1,37 +1,46 @@
 version: '3.8'
 
 services:
-  app:
-    image: maven:3.9-eclipse-temurin-21
-    container_name: java-spring-dev
+  # ========================================
+  # Inventory Management Service
+  # ========================================
+  inventory-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: inventory-service
     
-    # Monta o código e cache do Maven
-    volumes:
-      - .:/app
-      - maven-cache:/root/.m2
-    
-    working_dir: /app
-    
-    # Portas da aplicação e debug
     ports:
-      - "8080:8080"
-      - "5005:5005"
+      - "8081:8081"  # API REST
     
-    # Habilita debug remoto
     environment:
-      - MAVEN_OPTS=-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
+      # Spring Boot
+      - SPRING_PROFILES_ACTIVE=default
+      - SERVER_PORT=8081
+      
+      # Database H2 (in-memory)
+      - SPRING_DATASOURCE_URL=jdbc:h2:mem:inventory
+      - SPRING_DATASOURCE_USERNAME=sa
+      - SPRING_DATASOURCE_PASSWORD=
+      
+      # Logs
+      - LOGGING_LEVEL_ROOT=INFO
+      - LOGGING_LEVEL_COM_INVENTORY=DEBUG
     
-    # Mantém container ativo para o Dev Container
-    command: sleep infinity
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     
     networks:
-      - app-network
+      - inventory-network
 
-# Cache do Maven para não baixar dependências toda vez
-volumes:
-  maven-cache:
-    driver: local
-
+# ========================================
+# Networks
+# ========================================
 networks:
-  app-network:
+  inventory-network:
     driver: bridge
+    name: inventory-network

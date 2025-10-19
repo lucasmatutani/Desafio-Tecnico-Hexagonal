@@ -1,37 +1,49 @@
 # 🚀 Como Executar o Projeto
 
-Este guia mostra como executar o **Inventory Management Service** localmente.
+Este guia mostra como executar o **Inventory Management Service** usando **Docker**.
 
 ---
 
 ## Pré-requisitos
 
-- ☕ **Java 21+** ([Download](https://adoptium.net/))
-- 📦 **Maven 3.9+** ([Download](https://maven.apache.org/download.cgi))
+- 🐳 **Docker Desktop** ([Download](https://www.docker.com/products/docker-desktop))
+- 💾 **~500MB** de espaço em disco
 
 ---
 
-## 1 - Compile o Projeto
+## 🐳 Executar com Docker
+
+### Opção 1: Docker Compose (Recomendado) ⭐
 
 ```bash
-mvn clean install
+# Subir a aplicação (build + run automático)
+docker-compose up
+
+# Ou em background
+docker-compose up -d
+
+# Ver logs
+docker-compose logs -f
+
+# Parar
+docker-compose down
 ```
 
-**Saída esperada:**
-```
-[INFO] BUILD SUCCESS
-[INFO] Total time: 30.123 s
+### Opção 2: Docker Build Manual
+
+```bash
+# Build da imagem
+docker build -t inventory-service:latest .
+
+# Executar container
+docker run -p 8081:8081 inventory-service:latest
 ```
 
 ---
 
-## 2 - Execute a Aplicação
+## 📍 Acessar a Aplicação
 
-```bash
-mvn spring-boot:run
-```
-
-**A aplicação estará disponível em:**
+Após executar o Docker, a aplicação estará disponível em:
 
 | Recurso | URL |
 |---------|-----|
@@ -42,113 +54,7 @@ mvn spring-boot:run
 
 ---
 
-## 3 - Acessar H2 Console (Dev Mode)
-
-Acesse: http://localhost:8081/h2-console
-
-**Configurações:**
-
-```
-JDBC URL: jdbc:h2:mem:inventory
-User: sa
-Password: (deixe vazio)
-```
-
-**Queries úteis:**
-
-```sql
--- Ver todos os inventários
-SELECT * FROM inventory;
-
--- Ver todas as reservas
-SELECT * FROM reservation;
-
--- Ver histórico de eventos
-SELECT * FROM event ORDER BY timestamp DESC;
-```
-
----
-
-## 4 - Executar Testes
-
-### Todos os Testes
-
-```bash
-mvn test
-```
-
-**Saída esperada:**
-```
-Tests run: 78, Failures: 0, Errors: 0, Skipped: 0
-[INFO] BUILD SUCCESS
-```
-
-### Apenas Unit Tests
-
-```bash
-mvn test -Dtest="*Test"
-```
-
-### Apenas Integration Tests
-
-```bash
-mvn test -Dtest="*IntegrationTest"
-```
-
-### Apenas Architecture Tests
-
-```bash
-mvn test -Dtest="HexagonalArchitectureTest"
-```
-
-### Com Relatório de Cobertura
-
-```bash
-mvn clean test jacoco:report
-```
-
-**Relatório gerado em:** `target/site/jacoco/index.html`
-
-**Abrir relatório:**
-```bash
-# Linux/Mac
-open target/site/jacoco/index.html
-
-# Windows
-start target/site/jacoco/index.html
-```
-
----
-
-## 5 - Build para Produção
-
-### Gerar JAR
-
-```bash
-mvn clean package -DskipTests
-```
-
-**JAR gerado em:** `target/inventory-service-1.0.0.jar`
-
-### Executar JAR
-
-```bash
-java -jar target/inventory-service-1.0.0.jar
-```
-
-### Executar com Profile Específico
-
-```bash
-# Profile de teste
-java -jar target/inventory-service-1.0.0.jar --spring.profiles.active=test
-
-# Profile de produção (futuro)
-java -jar target/inventory-service-1.0.0.jar --spring.profiles.active=prod
-```
-
----
-
-## 🧪 Verificar se Está Funcionando
+## ✅ Verificar se Está Funcionando
 
 ### 1. Health Check
 
@@ -209,169 +115,236 @@ curl -X POST http://localhost:8081/api/v1/inventory/reserve \
 
 ---
 
+## 🗄️ Acessar H2 Console
+
+1. Acesse: http://localhost:8081/h2-console
+
+2. **Configurações:**
+
+```
+JDBC URL: jdbc:h2:mem:inventory
+User: sa
+Password: (deixe vazio)
+```
+
+3. **Queries úteis:**
+
+```sql
+-- Ver todos os inventários
+SELECT * FROM inventory;
+
+-- Ver todas as reservas
+SELECT * FROM reservation;
+
+-- Ver histórico de eventos (Event Sourcing)
+SELECT * FROM event ORDER BY timestamp DESC;
+```
+
+---
+
+## 🔧 Comandos Úteis
+
+### Gerenciamento de Containers
+
+```bash
+# Ver containers rodando
+docker ps
+
+# Ver logs em tempo real
+docker logs -f inventory-service
+
+# Acessar terminal do container
+docker exec -it inventory-service sh
+
+# Parar container
+docker-compose down
+
+# Parar e remover volumes
+docker-compose down -v
+```
+
+### Rebuild e Limpeza
+
+```bash
+# Rebuild forçado (se mudou código)
+docker-compose up --build
+
+# Rebuild sem cache
+docker-compose build --no-cache
+
+# Limpar tudo (imagens, containers, volumes)
+docker-compose down -v
+docker rmi inventory-service
+docker system prune -a
+```
+
+### Verificação
+
+```bash
+# Ver uso de recursos
+docker stats inventory-service
+
+# Inspecionar container
+docker inspect inventory-service
+
+# Ver logs dos últimos 100 linhas
+docker logs --tail 100 inventory-service
+```
+
+---
+
 ## 🐛 Troubleshooting
 
 ### Problema: Porta 8081 já está em uso
 
 **Erro:**
 ```
-The Tomcat connector configured to listen on port 8081 failed to start. The port may already be in use...
+Error starting userland proxy: listen tcp4 0.0.0.0:8081: bind: address already in use
 ```
 
-**Solução 1 - Mudar a porta:**
+**Solução 1 - Parar o que está usando a porta:**
 ```bash
-mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=8082
-```
-
-**Solução 2 - Matar o processo:**
-```bash
-# Linux/Mac
+# Linux/Mac - Encontrar e matar processo
 lsof -ti:8081 | xargs kill -9
 
-# Windows
+# Windows - Encontrar processo
 netstat -ano | findstr :8081
+# Depois matar pelo PID
 taskkill /PID <PID> /F
 ```
 
-### Problema: Maven não encontrado
+**Solução 2 - Mudar a porta no docker-compose.yml:**
+```yaml
+ports:
+  - "8082:8081"  # Porta 8082 no host, 8081 no container
+```
+
+### Problema: Docker não está rodando
 
 **Erro:**
 ```
-mvn: command not found
+Cannot connect to the Docker daemon
 ```
 
 **Solução:**
-```bash
-# Linux/Mac
-brew install maven  # macOS
-sudo apt install maven  # Ubuntu/Debian
+- Abra o Docker Desktop
+- Aguarde iniciar completamente
+- Tente novamente
 
-# Ou baixar manualmente:
-# https://maven.apache.org/download.cgi
-```
-
-### Problema: Java não encontrado ou versão incorreta
-
-**Erro:**
-```
-java: command not found
-```
+### Problema: Build muito lento
 
 **Solução:**
 ```bash
-# Verificar versão
-java -version
+# Limpar cache do Docker
+docker builder prune
 
-# Deve mostrar Java 21+
-# Se não, instale Java 21:
-# https://adoptium.net/
+# Rebuild sem cache
+docker-compose build --no-cache
 ```
 
-### Problema: Testes falhando
+### Problema: Container não inicia
 
-**Erro:**
+**Ver logs detalhados:**
+```bash
+docker-compose logs inventory-service
+
+# Ou logs completos
+docker logs inventory-service
 ```
-Tests run: 78, Failures: 2, Errors: 1
+
+**Verificar se tem erros de compilação:**
+```bash
+# Rebuild com saída completa
+docker-compose up --build
 ```
+
+### Problema: "Out of memory" durante build
 
 **Solução:**
 ```bash
-# Limpar e recompilar
-mvn clean install
-
-# Se ainda falhar, pular testes no build
-mvn clean install -DskipTests
-
-# Depois executar testes isoladamente
-mvn test
+# Aumentar memória do Docker Desktop
+# Settings → Resources → Memory → 4GB ou mais
 ```
 
-### Problema: H2 Console não abre
-
-**Erro:**
-```
-404 Not Found
-```
+### Problema: Mudanças no código não aparecem
 
 **Solução:**
-Verificar se a aplicação está rodando:
 ```bash
-curl http://localhost:8081/actuator/health
-```
-
-Se não estiver, iniciar com:
-```bash
-mvn spring-boot:run
-```
-
----
-
-## 🔄 Hot Reload (Desenvolvimento)
-
-Para reiniciar automaticamente a aplicação quando houver mudanças:
-
-### 1. Adicionar Spring DevTools (já incluído)
-
-```xml
-<dependency>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>spring-boot-devtools</artifactId>
-    <optional>true</optional>
-</dependency>
-```
-
-### 2. Executar em modo Dev
-
-```bash
-mvn spring-boot:run
-```
-
-**Agora qualquer mudança em arquivos `.java` reiniciará automaticamente a aplicação!**
-
----
-
-## 🐳 Docker (Opcional)
-
-Se preferir executar via Docker:
-
-### Build da Imagem
-
-```bash
-docker build -t inventory-service:latest .
-```
-
-### Executar Container
-
-```bash
-docker run -p 8081:8081 inventory-service:latest
-```
-
-### Docker Compose (com PostgreSQL)
-
-```bash
-docker-compose up -d
+# Rebuild forçado
+docker-compose down
+docker-compose up --build
 ```
 
 ---
 
 ## 📝 Variáveis de Ambiente
 
-Configurações que podem ser customizadas:
+Você pode customizar a aplicação editando o `docker-compose.yml`:
 
-| Variável | Padrão | Descrição |
-|----------|--------|-----------|
-| `SERVER_PORT` | 8081 | Porta da aplicação |
-| `SPRING_PROFILES_ACTIVE` | default | Profile ativo (test, prod) |
-| `H2_CONSOLE_ENABLED` | true | Habilitar H2 Console |
-| `LOGGING_LEVEL_ROOT` | INFO | Nível de log global |
-| `LOGGING_LEVEL_COM_INVENTORY` | DEBUG | Nível de log da aplicação |
-
-**Exemplo:**
-```bash
-export SERVER_PORT=9090
-export SPRING_PROFILES_ACTIVE=test
-mvn spring-boot:run
+```yaml
+environment:
+  # Porta da aplicação
+  - SERVER_PORT=8081
+  
+  # Profile (default, test, prod)
+  - SPRING_PROFILES_ACTIVE=default
+  
+  # Database
+  - SPRING_DATASOURCE_URL=jdbc:h2:mem:inventory
+  - SPRING_DATASOURCE_USERNAME=sa
+  - SPRING_DATASOURCE_PASSWORD=
+  
+  # Logs
+  - LOGGING_LEVEL_ROOT=INFO
+  - LOGGING_LEVEL_COM_INVENTORY=DEBUG
+  - LOGGING_LEVEL_ORG_HIBERNATE_SQL=INFO
 ```
+
+### Exemplo: Mudar porta
+
+```yaml
+environment:
+  - SERVER_PORT=9090
+ports:
+  - "9090:9090"  # Mudar ambas as portas
+```
+
+### Exemplo: Desabilitar logs SQL
+
+```yaml
+environment:
+  - LOGGING_LEVEL_ORG_HIBERNATE_SQL=WARN
+```
+
+---
+
+## 🧪 Executar Testes (Dentro do Container)
+
+### Opção 1: Usar imagem Maven
+
+```bash
+# Executar todos os testes
+docker run --rm -v $(pwd):/app -w /app maven:3.9-eclipse-temurin-21 mvn test
+
+# Apenas unit tests
+docker run --rm -v $(pwd):/app -w /app maven:3.9-eclipse-temurin-21 mvn test -Dtest="*Test"
+
+# Com relatório de cobertura
+docker run --rm -v $(pwd):/app -w /app maven:3.9-eclipse-temurin-21 mvn clean test jacoco:report
+```
+
+### Opção 2: Dentro do container em execução
+
+```bash
+# Acessar o container
+docker exec -it inventory-service sh
+
+# Dentro do container
+cd /app
+mvn test
+```
+
+**Nota:** Para desenvolvimento com testes frequentes, considere rodar localmente com Maven para ter feedback mais rápido.
 
 ---
 
@@ -382,18 +355,94 @@ Após executar o projeto:
 1. ✅ Explore o **Swagger UI**: http://localhost:8081/swagger-ui.html
 2. ✅ Teste os endpoints via Swagger ou `curl`
 3. ✅ Inspecione o banco H2: http://localhost:8081/h2-console
-4. ✅ Execute os testes: `mvn test`
-5. ✅ Gere o relatório de cobertura: `mvn clean test jacoco:report`
+4. ✅ Veja os logs: `docker-compose logs -f`
+5. ✅ Consulte a [Documentação de Arquitetura](ARCHITECTURE.md)
 
 ---
 
 ## 📚 Documentação Adicional
 
 - [README.md](README.md) - Visão geral do projeto
-- [ARCHITECTURE.md](ARCHITECTURE.md) - Arquitetura detalhada
 - [API Documentation](http://localhost:8081/swagger-ui.html) - Documentação interativa (após executar)
 
 ---
 
-**🎉 Projeto executando com sucesso! Acesse http://localhost:8081/swagger-ui.html para começar!**
+## 💡 Dicas
 
+### Para Desenvolvimento
+
+Se você vai desenvolver/modificar o código:
+
+1. **Monte o código como volume** no docker-compose.yml:
+   ```yaml
+   volumes:
+     - ./src:/app/src
+   ```
+
+2. **Use Spring DevTools** para hot reload (já incluído no pom.xml)
+
+3. **Ou rode localmente** para feedback mais rápido:
+   ```bash
+   mvn spring-boot:run
+   ```
+
+### Para Avaliação/Demo
+
+Se você só quer rodar para testar:
+
+1. **Use docker-compose** (mais simples)
+2. **Acesse o Swagger** para testar todos os endpoints
+3. **Consulte o H2 Console** para ver os dados
+
+### Para CI/CD
+
+Para integração contínua:
+
+```bash
+# Build e teste em uma linha
+docker-compose up -d && \
+docker-compose exec inventory-service mvn test && \
+docker-compose down
+```
+
+---
+
+## 📊 Recursos do Container
+
+O container está configurado com:
+
+- **Imagem Base:** `maven:3.9-eclipse-temurin-21-alpine`
+- **Tamanho:** ~500MB
+- **Memória:** Sem limite (use Docker Settings se precisar)
+- **CPU:** Sem limite
+- **Rede:** `inventory-network` (bridge)
+- **Healthcheck:** Verifica `/actuator/health` a cada 30s
+
+---
+
+## 🔍 Logs Estruturados
+
+Os logs seguem o padrão:
+
+```
+timestamp [thread] LEVEL logger - message
+
+Exemplo:
+2025-10-19 14:00:00 [http-nio-8081-exec-1] DEBUG ReserveStockService - Reserving 10 units of SKU123
+```
+
+**Ver logs filtrados:**
+```bash
+# Apenas DEBUG da aplicação
+docker logs inventory-service 2>&1 | grep DEBUG
+
+# Apenas erros
+docker logs inventory-service 2>&1 | grep ERROR
+
+# Últimas 50 linhas
+docker logs --tail 50 inventory-service
+```
+
+---
+
+**🎉 Projeto executando com sucesso! Acesse http://localhost:8081/swagger-ui.html para começar!**
