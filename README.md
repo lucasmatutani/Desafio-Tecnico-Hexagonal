@@ -694,11 +694,11 @@ void domainShouldNotDependOnAdapters() {
 
 ## 🏛️ Decisões Técnicas de Arquitetura
 
-Esta seção documenta as **5 principais decisões arquiteturais** que definem o design do sistema. Cada decisão está mapeada no diagrama de arquitetura e inclui contexto, alternativas consideradas e justificativa.
+Esta seção documenta as **principais decisões arquiteturais** que definem o design do sistema. Cada decisão está mapeada no diagrama de arquitetura e inclui contexto, alternativas consideradas e justificativa.
 
 ---
 
-### **1. Event-Driven Architecture com SNS/SQS (Fan-out Pattern)**
+### **Event-Driven Architecture com SNS/SQS (Fan-out Pattern)**
 
 **Contexto:**  
 Precisávamos de uma forma de propagar mudanças de estado do Inventory Service para múltiplos serviços consumidores (Query, Event Store, Notification, Analytics, Backup) sem acoplamento.
@@ -711,7 +711,6 @@ Adotar **Event-Driven Architecture** usando Amazon SNS (pub/sub) + SQS (filas) c
 | Alternativa | Prós | Contras | Decisão |
 |-------------|------|---------|---------|
 | **Chamadas HTTP síncronas** | Simples | Alto acoplamento, cascading failures | ❌ Rejeitada |
-| **Apache Kafka** | Alta performance | Complexidade operacional, overkill para MVP | ❌ Rejeitada |
 | **SNS + SQS** | Gerenciado, confiável, auto-scaling | Vendor lock-in AWS | ✅ **Escolhida** |
 | **RabbitMQ** | Flexível, open-source | Requer gerenciamento de infra | ⚠️ Alternativa válida |
 
@@ -738,29 +737,13 @@ Adotar **Event-Driven Architecture** usando Amazon SNS (pub/sub) + SQS (filas) c
 
 ---
 
-### **2. CQRS (Command Query Responsibility Segregation)**
+### **CQRS (Command Query Responsibility Segregation)**
 
 **Contexto:**  
 O Inventory Service precisa lidar com operações de escrita complexas (transações ACID, locking) E fornecer queries rápidas para dashboards/relatórios. Um único modelo não otimiza ambos.
 
 **Decisão:**  
 Implementar **CQRS interno (light)** com separação lógica de Commands (write) e Queries (read), preparado para evolução para CQRS completo (serviços separados).
-
-```
-         Write Model                    Read Model
-┌──────────────────────┐      ┌──────────────────────┐
-│ Inventory Service    │      │ Query Service        │
-│ Port: 8081          │      │ Port: 8083          │
-│                      │      │                      │
-│ PostgreSQL          │      │ DynamoDB            │
-│ (Normalized)        │      │ (Denormalized)      │
-└──────────┬───────────┘      └──────────▲──────────┘
-           │                             │
-           │ ① Publica evento            │ ③ Atualiza view
-           │                             │
-           └──────> SNS Topic ──────────┘
-                      ② Propaga
-```
 
 **Alternativas Consideradas:**
 
@@ -774,7 +757,6 @@ Implementar **CQRS interno (light)** com separação lógica de Commands (write)
 - ✅ **Separation of Concerns:** Write model foca em consistência, read model em performance
 - ✅ **Escalabilidade independente:** Write e Read podem escalar separadamente (futuro)
 - ✅ **Otimização específica:** PostgreSQL para writes (ACID), DynamoDB para reads (low latency)
-- ✅ **Simplicidade inicial:** CQRS interno mantém complexidade baixa no MVP
 - ✅ **Evolutivo:** Código já estruturado para separação completa
 
 **Trade-offs Aceitos:**
@@ -794,7 +776,7 @@ Implementar **CQRS interno (light)** com separação lógica de Commands (write)
 
 ---
 
-### **3. PostgreSQL (Write) + DynamoDB (Read) - Database per Service**
+### **PostgreSQL (Write) + DynamoDB (Read) - Database per Service**
 
 **Contexto:**  
 Diferentes serviços têm requisitos muito diferentes de banco de dados. Inventory Service precisa de **transações ACID e locking**, enquanto Query Service precisa de **low latency e auto-scaling**.
@@ -895,7 +877,7 @@ Request B: Agora pode prosseguir (com estoque correto)
 
 ---
 
-### **4. Transactional Outbox Pattern para Garantia de Entrega de Eventos**
+### **Transactional Outbox Pattern para Garantia de Entrega de Eventos**
 
 **Contexto:**  
 O Inventory Service precisa **garantir** que eventos sejam publicados no SNS quando dados são salvos no PostgreSQL. Se o SNS estiver fora ou falhar, não podemos perder eventos (outros serviços ficariam dessincronizados).
