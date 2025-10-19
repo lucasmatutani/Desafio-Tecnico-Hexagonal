@@ -260,24 +260,6 @@ public Result<ReservationView, DomainError> execute(ReserveStockCommand cmd) {
 
 ## 🚀 Como Executar
 
-**📖 [Guia Completo de Execução →](run.md)**
-
-### Quick Start
-
-```bash
-# 1. Clone e entre no diretório
-git clone https://github.com/seu-usuario/inventory-service.git
-cd inventory-service
-
-# 2. Compile e execute
-mvn clean install
-mvn spring-boot:run
-
-# 3. Acesse
-# API: http://localhost:8081
-# Swagger: http://localhost:8081/swagger-ui.html
-```
-
 **Para instruções detalhadas, troubleshooting e mais opções, consulte [run.md](run.md)**
 
 ---
