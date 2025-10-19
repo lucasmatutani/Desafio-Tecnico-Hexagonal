@@ -692,6 +692,265 @@ void domainShouldNotDependOnAdapters() {
 
 ---
 
+## 🏛️ Decisões Técnicas de Arquitetura
+
+Esta seção documenta as **5 principais decisões arquiteturais** que definem o design do sistema. Cada decisão está mapeada no diagrama de arquitetura e inclui contexto, alternativas consideradas e justificativa.
+
+---
+
+### **1. Event-Driven Architecture com SNS/SQS (Fan-out Pattern)**
+
+**Contexto:**  
+Precisávamos de uma forma de propagar mudanças de estado do Inventory Service para múltiplos serviços consumidores (Query, Event Store, Notification, Analytics, Backup) sem acoplamento.
+
+**Decisão:**  
+Adotar **Event-Driven Architecture** usando Amazon SNS (pub/sub) + SQS (filas) com padrão Fan-out (1 → N).
+
+**Alternativas Consideradas:**
+
+| Alternativa | Prós | Contras | Decisão |
+|-------------|------|---------|---------|
+| **Chamadas HTTP síncronas** | Simples | Alto acoplamento, cascading failures | ❌ Rejeitada |
+| **Apache Kafka** | Alta performance | Complexidade operacional, overkill para MVP | ❌ Rejeitada |
+| **SNS + SQS** | Gerenciado, confiável, auto-scaling | Vendor lock-in AWS | ✅ **Escolhida** |
+| **RabbitMQ** | Flexível, open-source | Requer gerenciamento de infra | ⚠️ Alternativa válida |
+
+**Justificativa:**
+- ✅ **Desacoplamento total:** Publisher não conhece consumers
+- ✅ **Resiliência:** Se um serviço cai, outros continuam funcionando
+- ✅ **Escalabilidade:** Adicionar novo consumer = criar fila + subscription
+- ✅ **Reliability:** SQS garante at-least-once delivery + DLQ para falhas
+- ✅ **Zero gerenciamento:** AWS cuida de scaling, failover, replicação
+
+**Trade-offs Aceitos:**
+- ⚠️ **Eventual Consistency:** Lag de 5-20s entre serviços (aceitável para read models)
+- ⚠️ **Vendor Lock-in:** Dependência da AWS (mitigado por abstrações no código)
+- ⚠️ **Custo:** Pay-per-request (mas otimizado com long polling)
+
+**Impacto no Diagrama:**
+- SNS Topic centralizado (nuvem amarela no diagrama)
+- 5 filas SQS com retention configurado
+- Setas tracejadas indicam comunicação assíncrona
+
+**Referências:**
+- [AWS SNS Fan-out Pattern](https://docs.aws.amazon.com/sns/latest/dg/sns-common-scenarios.html)
+- [Building Event-Driven Microservices - Adam Bellemare](https://www.oreilly.com/library/view/building-event-driven-microservices/9781492057888/)
+
+---
+
+### **2. CQRS (Command Query Responsibility Segregation)**
+
+**Contexto:**  
+O Inventory Service precisa lidar com operações de escrita complexas (transações ACID, locking) E fornecer queries rápidas para dashboards/relatórios. Um único modelo não otimiza ambos.
+
+**Decisão:**  
+Implementar **CQRS interno (light)** com separação lógica de Commands (write) e Queries (read), preparado para evolução para CQRS completo (serviços separados).
+
+```
+         Write Model                    Read Model
+┌──────────────────────┐      ┌──────────────────────┐
+│ Inventory Service    │      │ Query Service        │
+│ Port: 8081          │      │ Port: 8083          │
+│                      │      │                      │
+│ PostgreSQL          │      │ DynamoDB            │
+│ (Normalized)        │      │ (Denormalized)      │
+└──────────┬───────────┘      └──────────▲──────────┘
+           │                             │
+           │ ① Publica evento            │ ③ Atualiza view
+           │                             │
+           └──────> SNS Topic ──────────┘
+                      ② Propaga
+```
+
+**Alternativas Consideradas:**
+
+| Alternativa | Prós | Contras | Decisão |
+|-------------|------|---------|---------|
+| **Modelo único (CRUD)** | Simples | Não otimiza read/write | ❌ Rejeitada |
+| **CQRS completo (desde MVP)** | Máxima otimização | Complexidade prematura | ❌ Rejeitada |
+| **CQRS interno (light)** | Simples + evolutivo | Ainda um DB compartilhado | ✅ **Escolhida** |
+
+**Justificativa:**
+- ✅ **Separation of Concerns:** Write model foca em consistência, read model em performance
+- ✅ **Escalabilidade independente:** Write e Read podem escalar separadamente (futuro)
+- ✅ **Otimização específica:** PostgreSQL para writes (ACID), DynamoDB para reads (low latency)
+- ✅ **Simplicidade inicial:** CQRS interno mantém complexidade baixa no MVP
+- ✅ **Evolutivo:** Código já estruturado para separação completa
+
+**Trade-offs Aceitos:**
+- ⚠️ **Eventual Consistency:** Read model pode ter lag (5-20s) - aceitável para queries
+- ⚠️ **Duplicação de dados:** Mesmos dados em 2 BDs (inventory + inventory_view)
+- ⚠️ **Complexidade de sync:** Eventos devem manter modelos sincronizados
+
+**Impacto no Diagrama:**
+- Inventory Service no centro superior = Write Model
+- Query Service à esquerda = Read Model
+- Query Service tem 2 entradas: HTTP (API Gateway) + SQS (eventos)
+- Bancos de dados diferentes: PostgreSQL vs DynamoDB
+
+**Referências:**
+- [CQRS Pattern - Martin Fowler](https://martinfowler.com/bliki/CQRS.html)
+- [Implementing Domain-Driven Design - Vaughn Vernon](https://www.amazon.com/Implementing-Domain-Driven-Design-Vaughn-Vernon/dp/0321834577)
+
+---
+
+### **3. PostgreSQL (Write) + DynamoDB (Read) - Database per Service**
+
+**Contexto:**  
+Diferentes serviços têm requisitos muito diferentes de banco de dados. Inventory Service precisa de **transações ACID e locking**, enquanto Query Service precisa de **low latency e auto-scaling**.
+
+**Decisão:**  
+Adotar **Database per Service pattern** com tecnologias diferentes:
+- **Inventory Service:** PostgreSQL (strong consistency)
+- **Query Service:** DynamoDB (low latency, eventual consistency)
+- **Event Store Service:** DynamoDB (append-only, time-series)
+- **Notification Service:** DynamoDB (high throughput, TTL)
+- **Analytics Service:** DynamoDB (time-series metrics)
+
+**Mapeamento no Diagrama (veja cilindros de banco de dados):**
+```
+🟢 Inventory Service
+    ↓ JDBC
+  PostgreSQL (RDS)
+  • inventory table
+  • reservations table
+  • outbox_events table
+  
+  Por quê PostgreSQL?
+  ✅ Transações ACID multi-tabela
+  ✅ Pessimistic Locking (SELECT FOR UPDATE)
+  ✅ Foreign Keys, UNIQUE constraints
+  ✅ SQL completo (JOINs, aggregations)
+
+🩷 Query Service
+    ↓ AWS SDK
+  DynamoDB
+  • inventory_view table (denormalizado)
+  
+  Por quê DynamoDB?
+  ✅ Single-digit ms latency (< 10ms)
+  ✅ Auto-scaling (zero ops)
+  ✅ Serverless (pay-per-request)
+  ✅ Global Tables (multi-region)
+
+🔵 Event Store Service
+    ↓ AWS SDK
+  DynamoDB
+  • event_store table (append-only)
+  
+  Por quê DynamoDB?
+  ✅ Append-only natural (sem UPDATE/DELETE)
+  ✅ Time-series otimizado (Sort Key = timestamp)
+  ✅ Escalabilidade (milhões de eventos/dia)
+```
+
+**Alternativas Consideradas:**
+
+| Alternativa | Prós | Contras | Decisão |
+|-------------|------|---------|---------|
+| **PostgreSQL para tudo** | Um stack, simples | Lento para reads (> 50ms), caro escalar | ❌ Rejeitada |
+| **DynamoDB para tudo** | Rápido, escalável | Sem ACID, sem locking, transações limitadas | ❌ Rejeitada |
+| **PostgreSQL + DynamoDB (híbrido)** | Best tool for each job | Mais complexidade | ✅ **Escolhida** |
+
+**Justificativa:**
+
+| Requisito | Inventory (Write) | Query (Read) | Decisão |
+|-----------|-------------------|--------------|---------|
+| **Consistência** | ACID (crítico) | Eventual (OK) | Postgres / Dynamo |
+| **Locking** | Pessimistic (necessário) | Nenhum | Postgres / Dynamo |
+| **Latência** | 50ms OK | < 10ms | Postgres / Dynamo |
+| **Throughput** | 100 req/s | 10.000 req/s | Postgres / Dynamo |
+| **Custo** | Fixo ($150/mês) | Pay-per-use ($0.25/1M reads) | Postgres / Dynamo |
+
+**Trade-offs Aceitos:**
+- ⚠️ **Eventual Consistency:** Query pode ter lag de 5-20s (aceitável)
+- ⚠️ **Dois stacks:** Precisa conhecer PostgreSQL E DynamoDB
+- ⚠️ **Sincronização complexa:** Eventos devem manter dados consistentes
+
+**Impacto no Diagrama:**
+- Inventory Service conecta a **cilindro verde (PostgreSQL)**
+- Query Service conecta a **cilindro rosa (DynamoDB)**
+- Event Store conecta a **cilindro azul (DynamoDB)**
+- Setas tracejadas mostram sincronização via eventos
+
+**Por que NÃO DynamoDB no Inventory Service:**
+```java
+// ❌ PROBLEMA: DynamoDB não tem Pessimistic Locking
+
+Request A: Lê estoque = 10
+Request B: Lê estoque = 10  ← LÊ AO MESMO TEMPO!
+Request A: Reserva 10 (estoque = 0)
+Request B: Reserva 10 (estoque = -10) ← OVERBOOKING! ❌
+
+// ✅ SOLUÇÃO: PostgreSQL com SELECT FOR UPDATE
+Request A: SELECT * FROM inventory WHERE sku='SKU123' FOR UPDATE;
+Request B: ← BLOQUEADO até A terminar
+Request A: UPDATE ... COMMIT;
+Request B: Agora pode prosseguir (com estoque correto)
+```
+
+**Referências:**
+- [Database per Service Pattern - Chris Richardson](https://microservices.io/patterns/data/database-per-service.html)
+- [DynamoDB Best Practices](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/best-practices.html)
+
+---
+
+### **4. Transactional Outbox Pattern para Garantia de Entrega de Eventos**
+
+**Contexto:**  
+O Inventory Service precisa **garantir** que eventos sejam publicados no SNS quando dados são salvos no PostgreSQL. Se o SNS estiver fora ou falhar, não podemos perder eventos (outros serviços ficariam dessincronizados).
+
+**Decisão:**  
+Implementar **Transactional Outbox Pattern** com tabela `outbox_events` no PostgreSQL e job assíncrono para publicar eventos.
+
+**Alternativas Consideradas:**
+
+| Alternativa | Prós | Contras | Decisão |
+|-------------|------|---------|---------|
+| **Publicar evento diretamente** | Simples | Pode falhar APÓS commit do DB | ❌ Rejeitada |
+| **2-Phase Commit (2PC)** | Garantia forte | Complexo, lento, não escala | ❌ Rejeitada |
+| **Transactional Outbox** | Garantia + simplicidade | Tabela extra + job | ✅ **Escolhida** |
+
+**Justificativa:**
+- ✅ **Atomicidade garantida:** Salvar dados + salvar evento é 1 transação
+- ✅ **At-least-once delivery:** Evento sempre será publicado (retry automático)
+- ✅ **Idempotência:** Pode reprocessar sem duplicar (eventId único)
+- ✅ **Simples:** Apenas 1 tabela extra + 1 job
+- ✅ **Battle-tested:** Usado por grandes empresas (Uber, Netflix)
+
+**Tabela Outbox:**
+```sql
+CREATE TABLE outbox_events (
+    id BIGSERIAL PRIMARY KEY,
+    event_id VARCHAR(50) UNIQUE NOT NULL,
+    aggregate_id VARCHAR(50) NOT NULL,
+    event_type VARCHAR(50) NOT NULL,
+    payload TEXT NOT NULL,  -- JSON do evento
+    status VARCHAR(20) NOT NULL,  -- PENDING, PUBLISHED, FAILED
+    created_at TIMESTAMP NOT NULL,
+    published_at TIMESTAMP,
+    retry_count INT DEFAULT 0,
+    
+    INDEX idx_status_created (status, created_at)
+);
+```
+
+**Trade-offs Aceitos:**
+- ⚠️ **Lag de publicação:** Evento publicado 0-2s após commit (aceitável)
+- ⚠️ **Tabela extra:** Precisa gerenciar outbox (cleanup de eventos antigos)
+- ⚠️ **Eventual consistency:** Entre commit e publicação há uma janela
+
+**Impacto no Diagrama:**
+- PostgreSQL (cilindro verde) contém **outbox_events table**
+- Seta tracejada do PostgreSQL → SNS representa o **Outbox Publisher Job**
+- Nota no diagrama indica "Transactional Outbox Pattern"
+
+**Referências:**
+- [Transactional Outbox Pattern - Chris Richardson](https://microservices.io/patterns/data/transactional-outbox.html)
+- [Implementing the Outbox Pattern - Debezium Blog](https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/)
+
+---
+
 ## 🧪 Testes
 
 ### Estratégia de Testes
