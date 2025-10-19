@@ -62,7 +62,7 @@ com transações ACID e lógica de negócio complexa.
 
 Esta seria a implementação completa da solução: 
 
-![Architecture Diagram](diagrams/systemDiagram.jpg)
+![Architecture Diagram](diagrams/systemDiagram.png)
 
 Esse diagrama também pode ser encontrado em XML na pasta "diagrams" na raiz do projeto.
 
